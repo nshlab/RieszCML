@@ -1,0 +1,96 @@
+---
+title: "RieszRegression"
+---
+
+I think a good syntax we could be going after would involve something like this:
+
+```{r}
+# select a riesz representer from the catalog 
+rr <- riesz_representer_catalog$ate
+
+# or any of
+rr <- riesz_representer_catalog$cfmean_a1
+rr <- riesz_representer_catalog$cfmean_a0
+rr <- riesz_representer_catalog$att
+rr <- riesz_representer_catalog$cde
+rr <- riesz_representer_catalog$nde
+rr <- riesz_representer_catalog$mtp
+rr <- riesz_representer_catalog$subgroup_mean
+rr <- riesz_representer_catalog$longitudinal_ate
+rr <- riesz_representer_catalog$ade # average derivative effect
+# something for missingness mechanisms
+
+# what's inside the riesz representer? 
+rr$name 
+rr$description 
+rr$required_nuisances # a character vector like c('Q_a', 'g') 
+rr$eif # this is really what the riesz representer is (yes?)
+rr$estimate # function to produce an estimate of the parameter
+
+# what we can do with it:
+
+riesz_estimate(data = data, representer = rr, nuisances = nuis)
+riesz_tmle(data = data, representer = rr, nuisances = nuis)
+# where nuis is a named list of functions that take data |-> estimate nuisance
+# parameter
+
+# aspirationally, we want to be able to compose representers per Sal's 
+# theorem 
+riesz_representer_subgroup_mtp <- riesz_compose(
+  list(
+    riesz_representer_catalog$subgroup_mean,
+    riesz_representer_catalog$mtp
+  )
+)
+
+# or subgroup-specific average derivative effects
+riesz_representer_subgroup_ade <- riesz_compose(
+  list(
+    riesz_representer_catalog$subgroup_mean,
+    riesz_representer_catalog$ade
+  )
+)
+
+# I think the right way to think about this will be in "layers" of representers; 
+# e.g., the indexing that Sal uses in Theorem 2. 
+# 
+# And after the required nuisance functions and estimating the representer 
+# from one layer, it becomes available to the next layer?  and the subsequent
+# layers treat the prior representers as named 'required_nuisances'?
+
+# riesz_estimate should handle:
+#  - cross fitting required nuisances
+#    - could be nice to use origami::make_folds if we anticipate non-iid settings(?)
+#  - if passed a ComposedRieszRepresenter (e.g., a list of RieszRepresenters) 
+#    then perform estimation sequentially 
+#    - perhaps that means calling riesz_estimate_single_representer (an internal fn)
+#      either once or repeatedly 
+#
+# riesz_tmle should handle
+#  - fluctuation at every layer of a ComposedRieszRepresenter or 
+#    the one fluctuation for the single-timepoint estimators
+# 
+# both riesz_estimate and riesz_tmle should return psi_hat, EIFs, std errors, 
+# confidence intervals, etc. 
+```
+
+
+# Need to Figure Out 
+
+ - A data <-> labels interface -- probably similar to what I've already done 
+ in the CausalData R6 TargetedLearning implementation -- 
+   - or maybe I don't need this with the way nuis is described above 
+   - an alternative might be to store inside the RieszRepresenter objects 
+   something called
+   `rr$mapping` that defines a mapping like 
+     A |-> 'trt'
+     L |-> c('confounder1', 'confounder2')
+     Y |-> 'outcome'
+     Delta |-> 'mis'
+
+ - I think this implies that behind the scenes longitudinal_ate will be a 
+ `ComposedRieszRepresenter` object. 
+ 
+ - Haven't thought at all about vector-valued parameters ... is that
+ something I need to think about? 
+
