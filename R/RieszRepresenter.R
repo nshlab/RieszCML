@@ -1,75 +1,145 @@
 
-#' @importFrom assertthat assert_that
+#' @examples
+#' rr_ate <- RieszRepresenter$new(
+#'   nuis = function(data) {
+#'
+#'     m <- nadir::lnr_glm(data,
+#'                         formula = Y ~ L + A)
+#'     g <- nadir::lnr_logistic(
+#'       data, formula = A ~ L)
+#'
+#'     datacf0 <- datacf1 <- data
+#'     datacf0$A <- 0; datacf1$A <- 1
+#'
+#'     return(list(
+#'       m = m(data),
+#'       m1 = m(datacf1),
+#'       m0 = m(datacf0),
+#'       g = g(data)))
+#'   },
+#'   alpha = ~ A/g + (1-A)/(1-g),
+#'   f = ~ m,
+#'   h = ~ m1 - m0,
+#'   ic_expr = ~ h + alpha * (Y - f)
+#' )
+#'
+#' df <- tibble::tibble(
+#'   L = rnorm(n = 50),
+#'   A = rbinom(
+#'     n = 50,
+#'     size = 1,
+#'     prob = plogis(L)),
+#'   Y = L + rnorm(n = 50, mean = 5, sd = 1) * A)
+#'
+#' rr_ate$fit(data = df)
+#' mean(rr_ate$fit_ic)
+#'
 RieszRepresenter <- R6::R6Class(
-  "RieszRepresenter",
-  lock_objects = FALSE,
+  classname = 'RieszRepresenter',
+  portable = TRUE,
   public = list(
-    name = NULL,
-    description = NULL,
+    nuis = NULL,   # returns a named list with nuis vectors
+    alpha = NULL,  # a formula expression defining weights using nuis
+    f = NULL,      # a formula expression defining f using nuis
+    h = NULL,      # a formula expression defining h
 
-    required_nuisances = NULL,
-    psi_hat = NULL,
-    eif = NULL,
-    eval = NULL,
-    print = NULL,
+    fit_nuis = NULL, # for storing the fit vectors
+    fit_alpha = NULL,
+    fit_f = NULL,
+    fit_h = NULL,
+    fit_ic = NULL,
 
-    initialize = function(name,
-                          description = '',
-                          required_nuisances,
-                          psi_hat,
-                          eif,
-                          eval,
-                          print) {
-      self$name <- name
-      self$description <- description
+    ic_expr = NULL, # an uncentered influence curve
 
-      if (! missing(required_nuisances)) {
-        # we expect a character vector here
-        self$required_nuisances <- required_nuisances
+    initialize = function(
+      nuis,
+      alpha,
+      f,
+      h,
+      ic_expr = NULL) {
+
+      # preflight checks for nuis
+      if (is.list(nuis)) {
+        if (any(names(nuis) == "" | is.na(names(nuis)))) {
+          stop("if nuis is a list it must be named.")
+        }
+      }
+      if (! class(nuis) %in% c("list", "function")) {
+        stop("nuis must be either a named list or function.")
       }
 
-      # accept psi_hat function argument
-      if (! missing(psi_hat)) {
-        assert_that(is.function(psi_hat), msg = "psi_hat(data, nuis) must be a function.")
-        assert_that(
-          all(c('data', 'nuis') %in% formalArgs(psi_hat)),
-          msg = 'psi_hat must be a function taking data and nuis as arguments')
+      self$nuis <- nuis
+      self$alpha <- alpha
+      self$f <- f
+      self$h <- h
 
-        self$psi_hat <- psi_hat
-        environment(self$psi_hat) <- environment(self$initialize)
+      if (! is.null(ic_expr)) {
+        self$ic_expr <- ic_expr
       }
 
-      # accept eif function argument
-      if (! missing(eif)) {
-        assert_that(is.function(eif), msg = "eif(data, nuis, psi) must be a function." )
-        assert_that(
-          all(c('data', 'nuis', 'psi') %in% formalArgs(eif)),
-          msg = 'eif must be a function taking data, nuis, and psi as arguments.')
+      return(invisible(self))
+    },
 
-        self$eif <- eif
-        environment(self$eif) <- environment(self$initialize)
+    fit = function(data) {
+      if (is.function(self$nuis)) {
+        self$fit_nuis <- self$nuis(data)
+      } else if (is.list(self$nuis)) {
+        # TODO: check that every list element is a
+        # numeric vector here
+
+        self$fit_nuis <- self$nuis
       }
 
-      # accept eval function argument
-      if (! missing(eval)) {
-        assert_that(is.function(eval), msg = "eval(data, nuis) must be a function." )
-        assert_that(
-          all(c('data', 'nuis') %in% formalArgs(eval)),
-          msg = 'eval must be a function taking data and nuis as arguments.')
-
-        self$eval <- eval
-        environment(self$eval) <- environment(self$initialize)
+      # evaluating alpha
+      if (is.numeric(self$alpha)) {
+        self$fit_alpha <- self$alpha
+      } else if (inherits(self$alpha, 'formula')) {
+        alpha <- self$alpha[[2]]
+        # evaluate alpha in the nuis and data environment
+        alpha_eval_env <- list2env(c(as.list(data), self$fit_nuis), parent = baseenv())
+        self$fit_alpha <- eval(alpha, envir = alpha_eval_env)
       }
 
-      # accept print function argument
-      if (! missing(print)) {
-        assert_that(is.function(print), msg = "print must be a function." )
-
-        self$print <- print
-        environment(self$print) <- environment(self$initialize)
+      # evaluating f
+      if (is.numeric(self$f)) {
+        self$fit_f <- self$f
+      } else if (inherits(self$f, 'formula')) {
+        f <- self$f[[2]]
+        # evaluate f in the nuis and data environment
+        f_eval_env <- list2env(c(as.list(data), self$fit_nuis), parent = baseenv())
+        self$fit_f <- eval(f, envir = f_eval_env)
       }
 
+      # evaluating h
+       if (inherits(self$h, 'formula')) {
+        h <- self$h[[2]]
+        # evaluate h in the nuis and data environment
+        h_eval_env <- list2env(c(as.list(data), self$fit_nuis, list(f = self$fit_f)), parent = baseenv())
+        self$fit_h <- eval(h, envir = h_eval_env)
+      } else if (is.numeric(self$h)) {
+        self$fit_h <- self$h
+      }
+
+      if (inherits(self$ic_expr, 'formula')) {
+        ic <- self$ic_expr[[2]]
+
+        ic_eval_env <- list2env(
+          c(as.list(data), self$fit_nuis,
+            list(alpha = self$fit_alpha,
+                 f = self$fit_f,
+                 h = self$fit_h)),
+          parent = baseenv())
+
+        fit_ic <- eval(ic, envir = ic_eval_env)
+        fit_ic <- unname(fit_ic)
+        self$fit_ic <- fit_ic
+      }
+
+      return(invisible(NULL))
     }
-
   )
 )
+
+
+
+

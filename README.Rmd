@@ -1,5 +1,5 @@
 ---
-title: "RieszRegression"
+title: "RieszCML"
 ---
 
 I think a good syntax we could be going after would involve something like this:
@@ -9,11 +9,12 @@ I think a good syntax we could be going after would involve something like this:
 rr <- riesz_representer_catalog$ate
 
 # or any of
+rr <- riesz_representer_catalog$cfmean_a
 rr <- riesz_representer_catalog$cfmean_a1
 rr <- riesz_representer_catalog$cfmean_a0
 rr <- riesz_representer_catalog$att
-rr <- riesz_representer_catalog$cde
-rr <- riesz_representer_catalog$nde
+rr <- riesz_representer_catalog$cde # a joint-intervention -- similar to censoring -- joint on A and mediator 
+rr <- riesz_representer_catalog$nde 
 rr <- riesz_representer_catalog$mtp
 rr <- riesz_representer_catalog$subgroup_mean
 rr <- riesz_representer_catalog$longitudinal_ate
@@ -23,8 +24,10 @@ rr <- riesz_representer_catalog$ade # average derivative effect
 # what's inside the riesz representer? 
 rr$name 
 rr$description 
+rr$mapping # maps causal labels to data ( e.g., A |-> 'trt' )
 rr$required_nuisances # a character vector like c('Q_a', 'g') 
-rr$eif # this is really what the riesz representer is (yes?)
+rr$representer_weights(data, ) 
+rr$eif(data, representer_weights, nuis)   # efficient influence function (depends on a vector riesz representer values [weights] and nuisances) 
 rr$estimate # function to produce an estimate of the parameter
 
 # what we can do with it:
@@ -61,6 +64,14 @@ riesz_representer_subgroup_ade <- riesz_compose(
 # riesz_estimate should handle:
 #  - cross fitting required nuisances
 #    - could be nice to use origami::make_folds if we anticipate non-iid settings(?)
+# 
+#  ***** 
+#   Sal suggests keeping as simple as possible, and just not doing cross-fitting;
+#   AND 
+#   If we set it up so that the user can pass values for `nuisances` then they can
+#   figure out cross-fitting themselves. 
+#  *****
+# 
 #  - if passed a ComposedRieszRepresenter (e.g., a list of RieszRepresenters) 
 #    then perform estimation sequentially 
 #    - perhaps that means calling riesz_estimate_single_representer (an internal fn)

@@ -1,23 +1,35 @@
-.make_folds <- function(n, K = 2, seed = NULL) {
-  assertthat::assert_that(is.numeric(n) && length(n) == 1 && n >= 2, msg = "n must be >= 2")
-  assertthat::assert_that(is.numeric(K) && length(K) == 1 && K >= 2, msg = "K must be >= 2")
-  if (!is.null(seed)) set.seed(seed)
-  ids <- sample.int(n)
-  folds <- split(ids, rep(seq_len(K), length.out = n))
-  folds
+
+
+logit <- function(x) {
+  log(x)/log(1-x)
 }
 
+expit <- function(x) {
+  exp(x)/(1+exp(x))
+}
 
+to01 <- function(x, bounds) {
+  if (is.null(bounds)) stop("`bounds` must be provided for logistic fluctuation.")
+  if (!is.numeric(bounds) || length(bounds) != 2L) stop("`bounds` must be a numeric vector of length 2.")
+  a <- bounds[[1]]; b <- bounds[[2]]
+  if (!is.finite(a) || !is.finite(b)) stop("`bounds` must be finite.")
+  if (b <= a) stop("`bounds[2]` must be > `bounds[1]`.")
 
-.is_scalar_character <- function(x) is.character(x) && length(x) == 1 && !is.na(x)
-.is_scalar_numeric   <- function(x) is.numeric(x) && length(x) == 1 && !is.na(x)
+  (x - a) / (b - a)
+}
 
+from01 <- function(p, bounds) {
+  if (is.null(bounds)) stop("`bounds` must be provided.")
+  if (!is.numeric(bounds) || length(bounds) != 2L) stop("`bounds` must be a numeric vector of length 2.")
+  a <- bounds[[1]]; b <- bounds[[2]]
+  if (b <= a) stop("`bounds[2]` must be > `bounds[1]`.")
 
-.assert_list_has_names <- function(x, nms, what = "object") {
-  assert_that(is.list(x), msg = sprintf("%s must be a list", what))
-  missing <- setdiff(nms, names(x))
-  if (length(missing) > 0) {
-    stop(sprintf("%s is missing required names: %s", what, paste(missing, collapse = ", ")), call. = FALSE)
+  a + p * (b - a)
+}
+
+clip01 <- function(p, clip = 1e-6) {
+  if (!is.numeric(clip) || length(clip) != 1L || is.na(clip) || clip <= 0 || clip >= 0.5) {
+    stop("`clip` must be a numeric scalar in (0, 0.5).")
   }
-  invisible(TRUE)
+  pmin(pmax(p, clip), 1 - clip)
 }
