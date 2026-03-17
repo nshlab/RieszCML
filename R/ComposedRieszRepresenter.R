@@ -85,6 +85,7 @@
 #'
 #' EY_bar1 <- theta0 + theta2 * (beta0 + beta2) + theta3
 #' EY_bar1
+#' df <- sim_dgp(n=10000)
 #' rr1$fit(df)
 #' df$`h[j=1]` <- rr1$fit_h
 #' rr2$fit(df)
@@ -101,6 +102,8 @@
 #' rr_composed$fit(df)
 #' mean(rr_composed$fit_ic)
 #' var(rr_composed$fit_ic)/nrow(df)
+#'
+#' riesz_estimate(df, rr_composed)
 #'
 #' What did we learn:
 #' # riesz representers have to be fit in calculation order
