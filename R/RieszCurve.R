@@ -1,6 +1,26 @@
 
+#' An R6 Class with Components for Influence Function Based Estimation Using Riesz representers as Weights
+#'
+#' The title is a bit tongue in cheek, referencing the idea of a "Rieszfluence Curve."
+#'
+#' These objects can be thought of as storing the necessary components to
+#' construct the efficient influence function of the estimator and
+#' to compute a one-step estimator or TMLE based on that.
+#'
+#' Each 'rc' or RieszCurve object should have a \code{nuis}, \code{alpha},
+#' \code{f}, \code{h}, \code{ic_expr}, which respectively define:
+#'
+#'   - \code{nuis} a named list of nuisance function estimates
+#'   - \code{alpha} an one-sided formula expression for the weights which can
+#'   use data columns and the names of nuisance estimates
+#'   - \code{f} ...
+#'   - \code{h} ...
+#'   - \code{ic_expr} A one-sided formula expression for an
+#'     uncentered influence curve to use in IF-based estimation.
+#'     Often \code{ ~ h - alpha * (Y - f) }.
+#'
 #' @examples
-#' rr_ate <- RieszRepresenter$new(
+#' rc_ate <- RieszCurve$new(
 #'   nuis = function(data) {
 #'
 #'     m <- nadir::lnr_glm(data,
@@ -31,11 +51,11 @@
 #'     prob = plogis(L)),
 #'   Y = L + rnorm(n = 50, mean = 5, sd = 1) * A)
 #'
-#' rr_ate$fit(data = df)
-#' mean(rr_ate$fit_ic)
+#' rc_ate$fit(data = df)
+#' mean(rc_ate$fit_ic)
 #'
-RieszRepresenter <- R6::R6Class(
-  classname = 'RieszRepresenter',
+RieszCurve <- R6::R6Class(
+  classname = 'RieszCurve',
   portable = TRUE,
   public = list(
     nuis = NULL,   # returns a named list with nuis vectors
@@ -60,7 +80,7 @@ RieszRepresenter <- R6::R6Class(
 
       # preflight checks for nuis
       if (is.list(nuis)) {
-        if (any(names(nuis) == "" | is.na(names(nuis)))) {
+        if ((length(nuis) > 0 & is.null(names(nuis))) | any(names(nuis) == "" | is.na(names(nuis)))) {
           stop("if nuis is a list it must be named.")
         }
       }

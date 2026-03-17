@@ -1,6 +1,6 @@
 
-#' # example
-#' rr_cfmean_1 <- riesz_representer_catalog$cfmean_a(
+#' @examples
+#' rc_cfmean_1 <- riesz_representer_catalog$cfmean_a(
 #'   L = 'L',
 #'   A = 'A',
 #'   a = 1,
@@ -18,7 +18,7 @@
 #'       g = g(data)))
 #'   })
 #'
-#' rr_cfmean_0 <- riesz_representer_catalog$cfmean_a(
+#' rc_cfmean_0 <- riesz_representer_catalog$cfmean_a(
 #'   L = 'L',
 #'   A = 'A',
 #'   a = 0,
@@ -43,10 +43,8 @@
 #'   A = rbinom(n = n, size = 1, prob = plogis(L)),
 #'   Y = L + A + rnorm(n = n, sd = .1))
 #'
-#' riesz_estimate(data = df, rr = rr_cfmean_0)
-#' riesz_estimate(data = df, rr = rr_cfmean_1)
-
-
+#' riesz_estimate(data = df, rc = rc_cfmean_0)
+#' riesz_estimate(data = df, rc = rc_cfmean_1)
 riesz_representer_catalog <- list()
 
 riesz_representer_catalog$cfmean_a <- function(
@@ -58,7 +56,7 @@ riesz_representer_catalog$cfmean_a <- function(
 
   alpha_formula <- as.formula(paste0('~ I(', A, '==', a, ')/g'))
 
-  rr <- RieszRepresenter$new(
+  rc <- RieszCurve$new(
     nuis = nuis,
     alpha = alpha_formula,
     f = ~ m,

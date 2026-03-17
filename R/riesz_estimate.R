@@ -1,9 +1,9 @@
 
-#' Estimate a Statistical Parameter using a RieszRepresenter
+#' Estimate a Statistical Parameter using a RieszCurve
 #'
 #'@examples
 #'
-#' rr_ate <- RieszRepresenter$new(
+#' rc_ate <- RieszCurve$new(
 #'   nuis = function(data) {
 #'
 #'     m <- nadir::lnr_glm(data,
@@ -34,23 +34,23 @@
 #'     prob = plogis(L)),
 #'   Y = L + rnorm(n = 50, mean = 5, sd = 1) * A)
 #'
-#' riesz_estimate(data = df, rr = rr_ate)
+#' riesz_estimate(data = df, rc = rc_ate)
 #'
 #'
-riesz_estimate <- function(data, rr) {
-  if (! inherits(rr, "RieszRepresenter") & ! inherits(rr, "ComposedRieszRepresenter")) {
-    stop("rr must be a RieszRepresenter or ComposedRieszRepresenter.")
+riesz_estimate <- function(data, rc, significance_alpha = 0.05) {
+  if (! inherits(rc, "RieszCurve") & ! inherits(rc, "ComposedRieszCurve")) {
+    stop("rc must be a RieszCurve or ComposedRieszCurve.")
   }
 
-  if (inherits(rr, 'RieszRepresenter') || inherits(rr, 'ComposedRieszRepresenter')) {
-    rr$fit(data)
-    phi <- rr$fit_ic
+  if (inherits(rc, 'RieszCurve') || inherits(rc, 'ComposedRieszCurve')) {
+    rc$fit(data)
+    phi <- rc$fit_ic
 
     estimate <- mean(phi)
     var_estimate <- var(phi)/nrow(data)
     se <- sqrt(var_estimate)
-    ci_low <- estimate + se * qnorm(0.025)
-    ci_high <- estimate + se * qnorm(0.975)
+    ci_low <- estimate + se * qnorm(significance_alpha / 2)
+    ci_high <- estimate + se * qnorm(1 - significance_alpha / 2)
 
     return(list(
       estimate = estimate, var = var_estimate, se = se, ci_low = ci_low, ci_high = ci_high

@@ -1,0 +1,65 @@
+---
+title: "Bad-Onestep-Good-TMLE"
+output: html_document
+---
+
+```{r}
+set.seed(2026)
+
+n <- 400
+
+# Strong confounding + near positivity problems
+L <- rnorm(n)
+g_true <- plogis(-2 + 4 * L)
+A <- rbinom(n, 1, g_true)
+
+# True bounded outcome mean under A=1
+Q_true <- plogis(-1 + 2 * L + 1.5 * A)
+Y <- rbinom(n, 1, Q_true)
+
+df <- data.frame(L = L, A = A, Y = Y)
+
+# Deliberately bad nuisance fits:
+# 1) linear probability model for Y
+# 2) propensity model omitting nonlinearity / instability issues possible
+rc_bad <- RieszCurve$new(
+  nuis = function(data) {
+    # intentionally poor outcome regression
+    m_fit <- lm(Y ~ L + A, data = data)
+
+    data1 <- data
+    data1$A <- 1
+
+    # propensity fit
+    g_fit <- glm(A ~ L, family = binomial(), data = data)
+
+    list(
+      m = predict(m_fit, newdata = data),
+      ma = predict(m_fit, newdata = data1),
+      g = predict(g_fit, newdata = data, type = "response")
+    )
+  },
+  alpha = ~ I(A == 1) / g,
+  f = ~ m,
+  h = ~ ma,
+  ic_expr = ~ h + alpha * (Y - f)
+)
+
+# One-step
+est_os <- riesz_estimate(df, rc_bad)
+
+# TMLE with bounding
+est_tmle <- riesz_tmle(
+  data = df,
+  rc = rc_bad,
+  fluctuation = "logistic",
+  bounds = c(0, 1),
+  outcome_col = "Y",
+  use_intercept_and_weights = FALSE
+)
+
+est_os
+est_tmle
+range(est_tmle$f_star)
+range(est_tmle$h_star)
+```

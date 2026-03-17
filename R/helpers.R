@@ -1,7 +1,7 @@
 
 
 logit <- function(x) {
-  log(x)/log(1-x)
+  log(x / (1 - x))
 }
 
 expit <- function(x) {

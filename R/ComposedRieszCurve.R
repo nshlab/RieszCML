@@ -1,6 +1,6 @@
 
 #' @examples
-#' rr1 <- RieszRepresenter$new(
+#' rc1 <- RieszCurve$new(
 #'   nuis = function(data) {
 #'     m <- nadir::lnr_glm(data, formula = Y ~ L1 + A1 + L2 + A2)
 #'     dataA2eq1 <- data
@@ -18,7 +18,7 @@
 #'   alpha = ~ A2/g,
 #'   ic_expr = ~ h + alpha * (Y - f)
 #' )
-#' rr2 <- RieszRepresenter$new(
+#' rc2 <- RieszCurve$new(
 #'   nuis = function(data) {
 #'     m <- nadir::lnr_glm(data, formula = `h[j=1]` ~ L1 + A1)
 #'     dataA1eq1 <- data
@@ -43,15 +43,15 @@
 #'   A2 = rbinom(n = 50, prob = plogis(A1 - 0.5 + L2), size = 1),
 #'   Y = L2 + A2)
 #' # E[Y^\bar{1}] ==
-#' rr1$fit(df)
-#' df$`h[j=1]` <- rr1$fit_h
-#' rr2$fit(df)
+#' rc1$fit(df)
+#' df$`h[j=1]` <- rc1$fit_h
+#' rc2$fit(df)
 #'
 #' # This is the uncentered influence curve
 #' # that estimates psi=E[Y^\bar{1}] in mean:
 #'
-#' rr2$fit_h + rr2$fit_alpha * rr1$fit_alpha * (rr1$fit_h - rr2$fit_f) +
-#'   rr1$fit_alpha * (df$Y - rr1$fit_h)
+#' rc2$fit_h + rc2$fit_alpha * rc1$fit_alpha * (rc1$fit_h - rc2$fit_f) +
+#'   rc1$fit_alpha * (df$Y - rc1$fit_h)
 #'
 #' library(tibble)
 #'
@@ -86,40 +86,40 @@
 #' EY_bar1 <- theta0 + theta2 * (beta0 + beta2) + theta3
 #' EY_bar1
 #' df <- sim_dgp(n=10000)
-#' rr1$fit(df)
-#' df$`h[j=1]` <- rr1$fit_h
-#' rr2$fit(df)
+#' rc1$fit(df)
+#' df$`h[j=1]` <- rc1$fit_h
+#' rc2$fit(df)
 #'
-#' ic_curve <- rr2$fit_h + rr2$fit_alpha * rr1$fit_alpha * (rr1$fit_f - rr2$fit_f) +
-#'   rr1$fit_alpha * (df$Y - rr1$fit_h)
+#' ic_curve <- rc2$fit_h + rc2$fit_alpha * rc1$fit_alpha * (rc1$fit_f - rc2$fit_f) +
+#'   rc1$fit_alpha * (df$Y - rc1$fit_h)
 #' mean(ic_curve)
 #' var(ic_curve)/nrow(df)
 #'
-#' # now using the ComposedRieszRepresenter:
+#' # now using the ComposedRieszCurve:
 #'
-#' rr_list <- list(rr1, rr2)
-#' rr_composed <- ComposedRieszRepresenter$new( rr_list = rr_list )
-#' rr_composed$fit(df)
-#' mean(rr_composed$fit_ic)
-#' var(rr_composed$fit_ic)/nrow(df)
+#' rc_list <- list(rc1, rc2)
+#' rc_composed <- ComposedRieszCurve$new( rc_list = rc_list )
+#' rc_composed$fit(df)
+#' mean(rc_composed$fit_ic)
+#' var(rc_composed$fit_ic)/nrow(df)
 #'
-#' riesz_estimate(df, rr_composed)
+#' riesz_estimate(df, rc_composed)
 #'
-#' What did we learn:
+#' # What did we learn:
 #' # riesz representers have to be fit in calculation order
 #' # 1st is a regression on Y but all after are on h_{j-1}
-ComposedRieszRepresenter <- R6::R6Class(
-  classname = 'ComposedRieszRepresenter',
+ComposedRieszCurve <- R6::R6Class(
+  classname = 'ComposedRieszCurve',
   portable = TRUE,
   public = list(
-    rr_list = NULL,
+    rc_list = NULL,
 
     fit_ic = NULL,
 
     initialize = function(
-      rr_list
+      rc_list
     ) {
-      self$rr_list <- rr_list
+      self$rc_list <- rc_list
     },
 
     fit = function(data) {
@@ -127,28 +127,28 @@ ComposedRieszRepresenter <- R6::R6Class(
 
       product_alpha <- 1
 
-      for (i in 1:length(self$rr_list)) {
-        # fit the ith riesz representer
-        self$rr_list[[i]]$fit(data_modified)
+      for (j in 1:length(self$rc_list)) {
+        # fit the jth riesz representer
+        self$rc_list[[j]]$fit(data_modified)
 
-        h_str <- paste0('h[j=', i,']')
+        h_str <- paste0('h[j=', j,']')
 
-        data_modified[[h_str]] <- self$rr_list[[i]]$fit_h
+        data_modified[[h_str]] <- self$rc_list[[j]]$fit_h
 
-        product_alpha <- product_alpha * self$rr_list[[i]]$fit_alpha
+        product_alpha <- product_alpha * self$rc_list[[j]]$fit_alpha
 
-        if (i == 1) {
+        if (j == 1) {
 
           self$fit_ic <-
-            product_alpha * (data$Y - self$rr_list[[i]]$fit_f)
+            product_alpha * (data$Y - self$rc_list[[j]]$fit_f)
         } else {
 
           self$fit_ic <- self$fit_ic +
-            product_alpha * (self$rr_list[[i-1]]$fit_h - self$rr_list[[i]]$fit_f)
+            product_alpha * (self$rc_list[[j-1]]$fit_h - self$rc_list[[j]]$fit_f)
         }
 
-        if (i == length(self$rr_list)) {
-          self$fit_ic <- self$fit_ic + self$rr_list[[i]]$fit_h
+        if (j == length(self$rc_list)) {
+          self$fit_ic <- self$fit_ic + self$rc_list[[j]]$fit_h
         }
       }
 

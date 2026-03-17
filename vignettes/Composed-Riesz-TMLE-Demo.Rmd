@@ -1,0 +1,151 @@
+---
+title: "Composed Riesz Curve TMLE"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Composed-TMLE-Demo}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library(RieszCML)
+
+library(tibble)
+
+#---------------------------------------------
+# Simulate a simple longitudinal DGP
+#---------------------------------------------
+sim_dgp <- function(n) {
+  L1 <- rnorm(n, mean = 0, sd = 1)
+
+  # baseline treatment
+  A1 <- rbinom(n, size = 1, prob = plogis(-0.2 + 1.0 * L1))
+
+  # time-varying confounder affected by A1
+  U2 <- rnorm(n, mean = 0, sd = 1)
+  L2 <- 0.5 + 0.7 * L1 + 2.0 * A1 + U2
+
+  # second treatment
+  A2 <- rbinom(n, size = 1, prob = plogis(-0.3 + 0.6 * A1 + 1.2 * L2))
+
+  # bounded outcome in (0,1), convenient for logistic TMLE
+  Y <- plogis(-0.5 + 0.3 * L1 + 0.8 * L2 + 1.0 * A2)
+
+  tibble(
+    L1 = L1,
+    A1 = A1,
+    L2 = L2,
+    A2 = A2,
+    Y = Y
+  )
+}
+
+set.seed(1)
+df <- sim_dgp(n = 5000)
+
+#---------------------------------------------
+# Stage 1 RieszCurve:
+#   parameter is E[Y | L1, A1] under intervention A2 = 1
+#---------------------------------------------
+rc1 <- RieszCurve$new(
+  nuis = function(data) {
+    # regression for Y given current history
+    m_fit <- glm(Y ~ L1 + A1 + L2 + A2,
+                 family = gaussian(),
+                 data = data)
+
+    data_A2eq1 <- data
+    data_A2eq1$A2 <- 1
+
+    # treatment mechanism for A2
+    g_fit <- glm(A2 ~ L1 + A1 + L2,
+                 family = binomial(),
+                 data = data)
+
+    list(
+      m = predict(m_fit, newdata = data, type = "response"),
+      m1 = predict(m_fit, newdata = data_A2eq1, type = "response"),
+      g = predict(g_fit, newdata = data, type = "response")
+    )
+  },
+  h = ~ m1,
+  f = ~ m,
+  alpha = ~ A2 / g,
+  ic_expr = ~ h + alpha * (Y - f)
+)
+
+#---------------------------------------------
+# Stage 2 RieszCurve:
+#   parameter is E[h[j=1] | L1] under intervention A1 = 1
+#---------------------------------------------
+rc2 <- RieszCurve$new(
+  nuis = function(data) {
+    m_fit <- glm(`h[j=1]` ~ L1 + A1,
+                 family = gaussian(),
+                 data = data)
+
+    data_A1eq1 <- data
+    data_A1eq1$A1 <- 1
+
+    g_fit <- glm(A1 ~ L1,
+                 family = binomial(),
+                 data = data)
+
+    list(
+      m = predict(m_fit, newdata = data, type = "response"),
+      m1 = predict(m_fit, newdata = data_A1eq1, type = "response"),
+      g = predict(g_fit, newdata = data, type = "response")
+    )
+  },
+  h = ~ m1,
+  f = ~ m,
+  alpha = ~ A1 / g,
+  ic_expr = ~ h + alpha * (`h[j=1]` - f)
+)
+
+#---------------------------------------------
+# Compose the two stages
+#---------------------------------------------
+rc_composed <- ComposedRieszCurve$new(
+  rc_list = list(rc1, rc2)
+)
+
+#---------------------------------------------
+# One-step estimate using composed object
+#---------------------------------------------
+est_onestep <- riesz_estimate(
+  data = df,
+  rc = rc_composed
+)
+
+est_onestep
+```
+
+
+```{r}
+#---------------------------------------------
+# TMLE using the composed object
+#---------------------------------------------
+est_tmle <- riesz_tmle(
+  data = df,
+  rc = rc_composed,
+  fluctuation = "logistic",
+  bounds = c(0, 1),
+  outcome_col = "Y",
+  use_intercept_and_weights = FALSE
+)
+
+cat("One-step estimate: ", est_onestep$estimate, "\n")
+cat("TMLE estimate:     ", est_tmle$estimate, "\n")
+cat("One-step SE:       ", est_onestep$se, "\n")
+cat("TMLE SE:           ", est_tmle$se, "\n")
+cat("One-step 95% CI:       [", est_onestep$ci_low, ", ", est_tmle$ci_high, "]\n", sep = "")
+cat("TMLE 95% CI:       [", est_tmle$ci_low, ", ", est_tmle$ci_high, "]\n", sep = "")
+```

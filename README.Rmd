@@ -6,34 +6,34 @@ I think a good syntax we could be going after would involve something like this:
 
 ```{r}
 # select a riesz representer from the catalog 
-rr <- riesz_representer_catalog$ate
+rc <- riesz_representer_catalog$ate
 
 # or any of
-rr <- riesz_representer_catalog$cfmean_a
-rr <- riesz_representer_catalog$cfmean_a1
-rr <- riesz_representer_catalog$cfmean_a0
-rr <- riesz_representer_catalog$att
-rr <- riesz_representer_catalog$cde # a joint-intervention -- similar to censoring -- joint on A and mediator 
-rr <- riesz_representer_catalog$nde 
-rr <- riesz_representer_catalog$mtp
-rr <- riesz_representer_catalog$subgroup_mean
-rr <- riesz_representer_catalog$longitudinal_ate
-rr <- riesz_representer_catalog$ade # average derivative effect
+rc <- riesz_representer_catalog$cfmean_a
+rc <- riesz_representer_catalog$cfmean_a1
+rc <- riesz_representer_catalog$cfmean_a0
+rc <- riesz_representer_catalog$att
+rc <- riesz_representer_catalog$cde # a joint-intervention -- similar to censoring -- joint on A and mediator 
+rc <- riesz_representer_catalog$nde 
+rc <- riesz_representer_catalog$mtp
+rc <- riesz_representer_catalog$subgroup_mean
+rc <- riesz_representer_catalog$longitudinal_ate
+rc <- riesz_representer_catalog$ade # average derivative effect
 # something for missingness mechanisms
 
 # what's inside the riesz representer? 
-rr$name 
-rr$description 
-rr$mapping # maps causal labels to data ( e.g., A |-> 'trt' )
-rr$required_nuisances # a character vector like c('Q_a', 'g') 
-rr$representer_weights(data, ) 
-rr$eif(data, representer_weights, nuis)   # efficient influence function (depends on a vector riesz representer values [weights] and nuisances) 
-rr$estimate # function to produce an estimate of the parameter
+rc$name 
+rc$description 
+rc$mapping # maps causal labels to data ( e.g., A |-> 'trt' )
+rc$required_nuisances # a character vector like c('Q_a', 'g') 
+rc$representer_weights(data, ) 
+rc$eif(data, representer_weights, nuis)   # efficient influence function (depends on a vector riesz representer values [weights] and nuisances) 
+rc$estimate # function to produce an estimate of the parameter
 
 # what we can do with it:
 
-riesz_estimate(data = data, representer = rr, nuisances = nuis)
-riesz_tmle(data = data, representer = rr, nuisances = nuis)
+riesz_estimate(data = data, representer = rc, nuisances = nuis)
+riesz_tmle(data = data, representer = rc, nuisances = nuis)
 # where nuis is a named list of functions that take data |-> estimate nuisance
 # parameter
 
@@ -93,7 +93,7 @@ riesz_representer_subgroup_ade <- riesz_compose(
    - or maybe I don't need this with the way nuis is described above 
    - an alternative might be to store inside the RieszRepresenter objects 
    something called
-   `rr$mapping` that defines a mapping like 
+   `rc$mapping` that defines a mapping like 
      A |-> 'trt'
      L |-> c('confounder1', 'confounder2')
      Y |-> 'outcome'
