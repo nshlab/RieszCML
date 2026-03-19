@@ -4,6 +4,8 @@ output: html_document
 ---
 
 ```{r}
+library(RieszCML)
+
 set.seed(2026)
 
 n <- 400
@@ -60,6 +62,70 @@ est_tmle <- riesz_tmle(
 
 est_os
 est_tmle
+range(est_tmle$f_star)
+range(est_tmle$h_star)
+```
+
+
+```{r, attempt 2}
+n <- 400
+
+# Strong confounding + near positivity issues
+L <- rnorm(n)
+g_true <- plogis(-2 + 4 * L)
+A <- rbinom(n, 1, g_true)
+
+# True bounded outcome mean under A = 1
+Q_true <- plogis(-1 + 2 * L + 1.5 * A)
+Y <- rbinom(n, 1, Q_true)
+
+df <- data.frame(L = L, A = A, Y = Y)
+
+# ---------------------------------------------------------
+# Contrived pathological nuisance values supplied directly
+# ---------------------------------------------------------
+
+# absurdly bad current-regression f = m:
+# often negative, nowhere near a valid conditional mean
+m_bad <- -1.5 + 0.2 * L - 0.5 * A
+
+# absurdly bad counterfactual regression h = ma:
+# always > 1, so outside the parameter space
+ma_bad <- rep(1.35, n)
+
+# tiny treatment probabilities for treated units -> huge clever covariates
+g_bad <- ifelse(A == 1, 0.02, 0.98)
+
+rc_awful <- RieszCurve$new(
+  nuis = list(
+    m = m_bad,
+    ma = ma_bad,
+    g = g_bad
+  ),
+  alpha = ~ I(A == 1) / g,
+  f = ~ m,
+  h = ~ ma,
+  ic_expr = ~ h + alpha * (Y - f)
+)
+
+# One-step
+est_os <- riesz_estimate(df, rc_awful)
+
+# Bounded TMLE
+est_tmle <- riesz_tmle(
+  data = df,
+  rc = rc_awful,
+  fluctuation = "logistic",
+  bounds = c(0, 1),
+  outcome_col = "Y"
+)
+
+est_os
+est_tmle
+
+range(rc_awful$fit_f)
+range(rc_awful$fit_h)
+
 range(est_tmle$f_star)
 range(est_tmle$h_star)
 ```

@@ -1,0 +1,222 @@
+---
+title: "Super Learner, cross-fitting, and double cross-fitting"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Super Learner, cross-fitting, and double cross-fitting}
+  %\VignetteEngine{knitr::rmarkdown}
+  \usepackage[utf8]{inputenc}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r}
+library(RieszCML)
+library(nadir)
+
+simulate_data <- function(n, seed = NULL) {
+  if (!is.null(seed)) set.seed(seed)
+
+  L1 <- rnorm(n)
+  L2 <- rnorm(n)
+  L3 <- rnorm(n)
+  L4 <- rnorm(n)
+
+  eta_A <- -0.4 +
+    1.2 * sin(L1) -
+    0.8 * L2^2 +
+    0.7 * L3 * L4 +
+    0.5 * (L1 > 0) -
+    0.5 * (L2 > 1)
+
+  g <- expit(eta_A)
+  A <- rbinom(n, size = 1, prob = g)
+
+  eta_Y <- -0.8 +
+    0.8 * A +
+    0.6 * A * L1 -
+    0.5 * A * (L2 > 0) +
+    0.7 * sin(L1 * L3) +
+    0.4 * L2^2 -
+    0.3 * abs(L4)
+
+  Q <- expit(eta_Y)
+  Y <- rbinom(n, size = 1, prob = Q)
+
+  data.frame(L1 = L1, L2 = L2, L3 = L3, L4 = L4, A = A, Y = Y)
+}
+
+truth_ate_mc <- function(n_mc = 2e6, seed = 123) {
+  df_mc <- simulate_data(n_mc, seed = seed)
+
+  eta_Y1 <- with(df_mc,
+    -0.8 +
+      0.8 * 1 +
+      0.6 * 1 * L1 -
+      0.5 * 1 * (L2 > 0) +
+      0.7 * sin(L1 * L3) +
+      0.4 * L2^2 -
+      0.3 * abs(L4)
+  )
+
+  eta_Y0 <- with(df_mc,
+    -0.8 +
+      0.8 * 0 +
+      0.6 * 0 * L1 -
+      0.5 * 0 * (L2 > 0) +
+      0.7 * sin(L1 * L3) +
+      0.4 * L2^2 -
+      0.3 * abs(L4)
+  )
+
+  mean(plogis(eta_Y1) - plogis(eta_Y0))
+}
+
+truth_ate <- truth_ate_mc()
+truth_ate
+
+make_rc_ate <- function(nuis_fun) {
+  riesz_curve_catalog$ate(
+    L = "L",
+    A = "A",
+    Y = "Y",
+    nuis = nuis_fun
+  )
+}
+
+make_nuis_superlearner_nocf <- function() {
+  function(data) {
+    outcome_formula <- Y ~ A + L1 + L2 + L3 + L4 +
+      I(L1 * L3) + I(L2^2) + I(abs(L4)) + A:L1 + A:I(L2 > 0)
+
+    prop_formula <- A ~ L1 + L2 + L3 + L4 +
+      I(sin(L1)) + I(L2^2) + I(L3 * L4) + I(L1 > 0) + I(L2 > 1)
+
+    m_fit <- nadir::super_learner(
+      data = data,
+      formula = outcome_formula,
+      learners = list(nadir::lnr_logistic, nadir::lnr_rf_binary, nadir::lnr_xgboost, nadir::lnr_glmnet),
+      outcome_type = "binary"
+    )
+
+    g_fit <- nadir::super_learner(
+      data = data,
+      formula = prop_formula,
+      learners = list(nadir::lnr_logistic, nadir::lnr_rf_binary, nadir::lnr_xgboost, nadir::lnr_glmnet),
+      outcome_type = "binary"
+    )
+
+    data1 <- data
+    data0 <- data
+    data1$A <- 1
+    data0$A <- 0
+
+    list(
+      m = predict(m_fit, data),
+      m1 = predict(m_fit, data1),
+      m0 = predict(m_fit, data0),
+      g = predict(g_fit, data)
+    )
+  }
+}
+
+set.seed(1)
+df <- simulate_data(4000, seed = 1)
+
+rc_ate_nocf <- make_rc_ate(make_nuis_superlearner_nocf())
+fit_ate_nocf <- riesz_tmle(
+  data = df,
+  rc = rc_ate_nocf,
+  fluctuation = "logistic",
+  bounds = c(0, 1),
+  outcome_col = "Y"
+)
+
+fit_ate_nocf
+c(estimate = fit_ate_nocf$estimate, truth = truth_ate)
+```
+
+
+# Now with Cross-Fitting
+
+```{r}
+options(future.globals.maxSize = Inf)
+make_folds <- function(n, V = 5, seed = 1) {
+  set.seed(seed)
+  sample(rep(seq_len(V), length.out = n))
+}
+
+make_nuis_superlearner_cf <- function(V = 5, seed = 1) {
+  function(data) {
+    n <- nrow(data)
+    fold_id <- make_folds(n, V = V, seed = seed)
+
+    m_hat <- numeric(n)
+    m1_hat <- numeric(n)
+    m0_hat <- numeric(n)
+    g_hat <- numeric(n)
+
+    outcome_formula <- Y ~ A + L1 + L2 + L3 + L4 +
+      I(L1 * L3) + I(L2^2) + I(abs(L4)) + A:L1 + A:I(L2 > 0)
+
+    prop_formula <- A ~ L1 + L2 + L3 + L4 +
+      I(sin(L1)) + I(L2^2) + I(L3 * L4) + I(L1 > 0) + I(L2 > 1)
+
+    for (v in seq_len(V)) {
+      train_idx <- which(fold_id != v)
+      valid_idx <- which(fold_id == v)
+
+      train <- data[train_idx, , drop = FALSE]
+      valid <- data[valid_idx, , drop = FALSE]
+
+      m_fit <- nadir::super_learner(
+        data = train,
+        formula = outcome_formula,
+      learners = list(nadir::lnr_logistic, nadir::lnr_rf_binary, nadir::lnr_xgboost, nadir::lnr_glmnet),
+      outcome_type = "binary"
+      )
+
+      g_fit <- nadir::super_learner(
+        data = train,
+        formula = prop_formula,
+      learners = list(nadir::lnr_logistic, nadir::lnr_rf_binary, nadir::lnr_xgboost, nadir::lnr_glmnet),
+      outcome_type = "binary"
+      )
+
+      valid1 <- valid
+      valid0 <- valid
+      valid1$A <- 1
+      valid0$A <- 0
+
+      m_hat[valid_idx] <- predict(m_fit, valid)
+      m1_hat[valid_idx] <- predict(m_fit, valid1)
+      m0_hat[valid_idx] <- predict(m_fit, valid0)
+      g_hat[valid_idx] <- predict(g_fit, valid)
+    }
+
+    list(
+      m = m_hat,
+      m1 = m1_hat,
+      m0 = m0_hat,
+      g = g_hat
+    )
+  }
+}
+rc_ate_cf <- make_rc_ate(make_nuis_superlearner_cf(V = 5, seed = 1))
+fit_ate_cf <- riesz_tmle(
+  data = df,
+  rc = rc_ate_cf,
+  fluctuation = "logistic",
+  bounds = c(0, 1),
+  use_intercept_and_weights = FALSE,
+  outcome_col = "Y"
+)
+
+fit_ate_cf
+c(estimate = fit_ate_cf$estimate, truth = truth_ate)
+```
+

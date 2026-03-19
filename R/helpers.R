@@ -1,12 +1,7 @@
 
+logit <- qlogis
 
-logit <- function(x) {
-  log(x / (1 - x))
-}
-
-expit <- function(x) {
-  exp(x)/(1+exp(x))
-}
+expit <- plogis
 
 to01 <- function(x, bounds) {
   if (is.null(bounds)) stop("`bounds` must be provided for logistic fluctuation.")

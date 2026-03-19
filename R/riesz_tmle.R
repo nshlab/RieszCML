@@ -1,3 +1,4 @@
+#' @export
 riesz_tmle <- function(data,
                        rc,
                        fluctuation = "logistic",
@@ -43,7 +44,7 @@ riesz_tmle <- function(data,
     ))
   }
 
-  stop("`rc` must inherit from `RieszCurve` or `ComposedRieszCurve`.")
+  stop("`rc` must be a RieszCurve or ComposedRieszCurve.")
 }
 
 
@@ -131,7 +132,6 @@ riesz_tmle <- function(data,
       coefs <- stats::coef(fit)
       intercept <- 0
       eps <- unname(coefs["(Intercept)"])
-      if (is.na(intercept)) intercept <- 0
     } else {
       fit <- stats::glm(
         target ~ -1 + H,
@@ -222,10 +222,10 @@ riesz_tmle <- function(data,
     var = var_estimate,
     se = se,
     ci_low = ci_low,
-    ci_high = ci_high
+    ci_high = ci_high,
+    n = n
   )
 }
-
 
 .apply_fluctuation_map <- function(x,
                                    clever_covariate,
@@ -254,7 +254,6 @@ riesz_tmle <- function(data,
 
   stop("Unsupported `fluctuation`.")
 }
-
 
 .riesz_tmle_single <- function(data,
                                rc,
@@ -295,26 +294,31 @@ riesz_tmle <- function(data,
   )
 
   tmle_estimate <- mean(h_star)
-
-  # inference IC: untargeted nuisance parts plugged in,
-  # but inference centered around the TMLE plug-in estimate
   ic_for_inference <- h_star + alpha * (y - f)
 
-  out <- .summarize_tmle_fit(
+  summarized_tmle_fit <- .summarize_tmle_fit(
     estimate = tmle_estimate,
     ic_for_inference = ic_for_inference,
     significance_alpha = significance_alpha
   )
 
-  out$eps <- fluc$eps
-  out$intercept <- fluc$intercept
-  out$ic <- ic_for_inference
-  out$f_star <- f_star
-  out$h_star <- h_star
-  out$fluctuation_model <- fluc$fit
-  out
+  RieszFit$new(
+    estimate = summarized_tmle_fit$estimate,
+    var = summarized_tmle_fit$var,
+    se = summarized_tmle_fit$se,
+    ci_low = summarized_tmle_fit$ci_low,
+    ci_high = summarized_tmle_fit$ci_high,
+    significance_alpha = significance_alpha,
+    estimator = "TMLE",
+    n = summarized_tmle_fit$n,
+    ic = ic_for_inference,
+    eps = fluc$eps,
+    intercept = fluc$intercept,
+    f_star = f_star,
+    h_star = h_star,
+    fluctuation_model = fluc$fit
+  )
 }
-
 
 .riesz_tmle_composed <- function(data,
                                  rc,
@@ -390,7 +394,6 @@ riesz_tmle <- function(data,
 
   tmle_estimate <- mean(h_star_list[[J]])
 
-  # inference IC: untargeted residual pieces, targeted final plug-in
   ic_for_inference <- rep(0, n)
   for (j in seq_len(J)) {
     ic_for_inference <- ic_for_inference +
@@ -398,142 +401,29 @@ riesz_tmle <- function(data,
   }
   ic_for_inference <- ic_for_inference + h_star_list[[J]]
 
-  out <- .summarize_tmle_fit(
+  summarized_tmle_fit <- .summarize_tmle_fit(
     estimate = tmle_estimate,
     ic_for_inference = ic_for_inference,
     significance_alpha = significance_alpha
   )
 
-  out$eps <- eps_vec
-  out$intercept <- intercept_vec
-  out$ic <- ic_for_inference
-  out$omega <- omega_list
-  out$targets <- target_list
-  out$f_star <- f_star_list
-  out$h_star <- h_star_list
-  out$fluctuation_models <- fluctuation_models
-  out
+  RieszFit$new(
+    estimate = summarized_tmle_fit$estimate,
+    var = summarized_tmle_fit$var,
+    se = summarized_tmle_fit$se,
+    ci_low = summarized_tmle_fit$ci_low,
+    ci_high = summarized_tmle_fit$ci_high,
+    significance_alpha = significance_alpha,
+    estimator = "TMLE",
+    n = summarized_tmle_fit$n,
+    eps = eps_vec,
+    intercept = intercept_vec,
+    ic = ic_for_inference,
+    f_star = f_star_list,
+    h_star = h_star_list,
+    fluctuation_models = fluctuation_models,
+    omega = omega_list,
+    targets = target_list
+  )
 }
 
-
-
-# old 2026-03-17 ---------------------------------------------------------------------
-#
-# riesz_tmle <- function(data,
-#                        rc,
-#                        fluctuation = 'logistic',
-#                        bounds,
-#                        outcome_col,
-#                        use_intercept_and_weights = TRUE,
-#                        clip = 1e-6,
-#                        significance_alpha = .05) {
-#
-#   # checks
-#   if (!inherits(rc, "RieszCurve")) stop("`rc` must be a RieszCurve.")
-#   if (!is.character(outcome_col) || length(outcome_col) != 1L || outcome_col == "" || is.na(outcome_col)) {
-#     stop("`outcome_col` must be a non-empty character scalar.")
-#   }
-#   if (!outcome_col %in% names(data)) stop("`outcome_col` is not a column in `data`.")
-#
-#
-#   # if identity, defer to riesz_estimate
-#   if (fluctuation == 'identity') {
-#     return(riesz_estimate(data, rc))
-#   }
-#
-#   # fluctuation on the logistic scale
-#   if (fluctuation == 'logistic') {
-#
-#     # bounds checks
-#     if (is.null(bounds)) stop("For `fluctuation = 'logistic'`, you must provide `bounds = c(a, b)`.")
-#     if (!is.numeric(bounds) || length(bounds) != 2L) stop("`bounds` must be numeric length 2: c(a, b).")
-#     a <- bounds[[1]]; b <- bounds[[2]]
-#     if (!is.finite(a) || !is.finite(b)) stop("`bounds` must be finite.")
-#     if (b <= a) stop("`bounds[2]` must be > `bounds[1]`.")
-#
-#     # fit rc pieces
-#     rc$fit(data)
-#
-#     if (is.null(rc$fit_alpha)) stop("After rc$fit(data), rc$fit_alpha is NULL.")
-#     if (is.null(rc$fit_h)) stop("After rc$fit(data), rc$fit_h is NULL.")
-#     if (is.null(rc$fit_f)) stop("After rc$fit(data), rc$fit_f is NULL (need the regression f).")
-#
-#     alpha <- rc$fit_alpha
-#     h <- rc$fit_h
-#     f <- rc$fit_f
-#     y <- data[[outcome_col]]
-#     n <- nrow(data)
-#
-#     if (!is.numeric(alpha) || length(alpha) != n) stop("`alpha` must be numeric length nrow(data).")
-#     if (!is.numeric(h) || length(h) != n) stop("`h` must be numeric length nrow(data).")
-#     if (!is.numeric(f) || length(f) != n) stop("`f` must be numeric length nrow(data).")
-#     if (!is.numeric(y) || length(y) != n) stop("Outcome must be numeric length nrow(data).")
-#
-#     # map to [0,1]
-#     y01 <- to01(y, bounds)
-#     f01 <- to01(f, bounds)
-#
-#     # range checks
-#     if (any(!is.finite(y01))) stop("Outcome mapped to [0,1] produced non-finite values.")
-#     if (any(!is.finite(f01))) stop("f mapped to [0,1] produced non-finite values.")
-#
-#     # clip away from 0/1 for logit
-#     y01 <- clip01(y01, clip = clip)
-#     f01 <- clip01(f01, clip = clip)
-#
-#     # Fit fluctuation: logit(f*) = logit(f) + eps * alpha
-#     tmle_data <- data.frame(
-#       y01 = y01,
-#       alpha = alpha,
-#       offset = logit(f01)
-#     )
-#
-#     if (use_intercept_and_weights) {
-#       tmle_formula <- y01 ~ 1
-#     } else {
-#       tmle_formula <- y01 ~ -1 + alpha
-#     }
-#
-#     fluctuation_model <- suppressWarnings(stats::glm(
-#       formula = tmle_formula,
-#       family = stats::binomial(),
-#       data = tmle_data,
-#       offset = tmle_data$offset,
-#       weights = if (use_intercept_and_weights) tmle_data[['alpha']] else NULL
-#     )) # tends to message that non-integer #successes were given in a
-#     # binomial glm or that glm.fit fitted probabilities numerically 0 or 1
-#
-#     if (use_intercept_and_weights) {
-#       eps <- as.numeric(stats::coef(fluctuation_model)[['(Intercept)']])
-#     } else {
-#       eps <- as.numeric(stats::coef(fluctuation_model)[["alpha"]])
-#     }
-#     if (!is.finite(eps)) stop("Fluctuation coefficient `eps` is non-finite.")
-#
-#     f01_star <- expit(logit(f01) + eps * alpha)
-#     f01_star <- clip01(f01_star, clip = clip)
-#
-#     # map back to [a,b]
-#     f_star <- from01(f01_star, bounds)
-#
-#     # updated IC contribution (uncentered)
-#     ic_star <- h + alpha * (y - f_star)
-#
-#     estimate <- mean(ic_star)
-#     var_estimate <- stats::var(ic_star) / n
-#     se <- sqrt(var_estimate)
-#     ci_low <- estimate + stats::qnorm(significance_alpha / 2) * se
-#     ci_high <- estimate + stats::qnorm(1 - significance_alpha / 2) * se
-#
-#     return(list(
-#       estimate = estimate,
-#       var = var_estimate,
-#       se = se,
-#       ci_low = ci_low,
-#       ci_high = ci_high,
-#       eps = eps,
-#       ic = ic_star,
-#       f_star = f_star
-#     ))
-#   }
-# }

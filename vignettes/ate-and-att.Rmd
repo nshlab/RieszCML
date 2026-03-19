@@ -1,0 +1,181 @@
+---
+title: "ATE and ATT with RieszCML"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{ATE and ATT with RieszCML}
+  %\VignetteEngine{knitr::rmarkdown}
+  \usepackage[utf8]{inputenc}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+This vignette illustrates estimation of the average treatment effect (ATE) and average treatment effect among the treated (ATT) using `{RieszCML}`.
+
+We simulate data from a simple point-treatment causal model where the truth is known:
+$$
+L \sim N(0,1), \qquad
+A \mid L \sim \text{Bernoulli}\{\operatorname{expit}(L)\},$$
+$$Y = 2 + L + \tau A + \varepsilon, \qquad \varepsilon \sim N(0, \sigma^2).$$
+Because the treatment effect is additive and constant, the causal contrasts are known exactly:
+$$\mathbb E[Y^1] = 2 + \mathbb E[L] + \tau = 2 + \tau,$$
+$$\mathbb E[Y^0] = 2 + \mathbb E[L] = 2,$$
+$$\text{ATE} = \mathbb E[Y^1 - Y^0] = \tau,
+\qquad
+\text{ATT} = \mathbb E[Y^1 - Y^0 \mid A=1] = \tau.$$
+```{r}
+library(RieszCML)
+
+set.seed(1)
+
+n <- 5000
+tau <- 1.5
+sigma <- 0.25
+
+L <- rnorm(n)
+A <- rbinom(n, size = 1, prob = plogis(L))
+Y <- 2 + L + tau * A + rnorm(n, sd = sigma)
+
+df <- data.frame(L = L, A = A, Y = Y)
+
+truth_mu1 <- 2 + tau
+truth_mu0 <- 2
+truth_ate <- tau
+truth_att <- tau
+
+c(
+  truth_mu1 = truth_mu1,
+  truth_mu0 = truth_mu0,
+  truth_ate = truth_ate,
+  truth_att = truth_att
+)
+```
+
+We first estimate $\mathbb E[Y^1]$ and $\mathbb E[Y^0]$, then combine them via the delta method.
+
+```{r}
+rc_mu1 <- riesz_curve_catalog$cfmean_a(
+  a = 1,
+  nuis = function(data) {
+    m_fit <- lm(Y ~ L + A, data = data)
+    g_fit <- glm(I(A == 1) ~ L, family = binomial(), data = data)
+
+    data1 <- data
+    data1$A <- 1
+
+    list(
+      m = predict(m_fit, newdata = data),
+      ma = predict(m_fit, newdata = data1),
+      g = predict(g_fit, newdata = data, type = "response")
+    )
+  }
+)
+
+rc_mu0 <- riesz_curve_catalog$cfmean_a(
+  a = 0,
+  nuis = function(data) {
+    m_fit <- lm(Y ~ L + A, data = data)
+    g_fit <- glm(I(A == 0) ~ L, family = binomial(), data = data)
+
+    data0 <- data
+    data0$A <- 0
+
+    list(
+      m = predict(m_fit, newdata = data),
+      ma = predict(m_fit, newdata = data0),
+      g = predict(g_fit, newdata = data, type = "response")
+    )
+  }
+)
+
+fit_mu1 <- riesz_estimate(df, rc_mu1)
+fit_mu0 <- riesz_estimate(df, rc_mu0)
+
+fit_mu1
+fit_mu0
+
+fit_ate <- riesz_delta_difference(
+  fit_mu1,
+  fit_mu0,
+  parameter = "ATE = E[Y^1] - E[Y^0]"
+)
+
+fit_ate
+
+c(
+  estimate_mu1 = fit_mu1$estimate,
+  truth_mu1 = truth_mu1,
+  estimate_mu0 = fit_mu0$estimate,
+  truth_mu0 = truth_mu0,
+  estimate_ate = fit_ate$estimate,
+  truth_ate = truth_ate
+)
+```
+
+Of course, that would be equivalent to using the `ate` method in the `riesz_curve_catalog`. 
+
+```{r}
+rc_ate <- riesz_curve_catalog$ate(
+  nuis = function(data) {
+    m_fit <- lm(Y ~ L + A, data = data)
+    g_fit <- glm(A ~ L, family = binomial(), data = data)
+
+    data1 <- data
+    data0 <- data
+    data1$A <- 1
+    data0$A <- 0
+
+    list(
+      m = predict(m_fit, newdata = data),
+      m1 = predict(m_fit, newdata = data1),
+      m0 = predict(m_fit, newdata = data0),
+      g = predict(g_fit, newdata = data, type = "response")
+    )
+  }
+)
+
+fit_ate <- riesz_estimate(df, rc_ate)
+fit_ate
+
+c(
+  estimate_ate = fit_ate$estimate,
+  truth_ate = truth_ate
+)
+```
+
+```{r}
+rc_att <- riesz_curve_catalog$att(
+  nuis = function(data) {
+    m_fit <- lm(Y ~ L + A, data = data)
+    g_fit <- glm(A ~ L, family = binomial(), data = data)
+
+    data1 <- data
+    data0 <- data
+    data1$A <- 1
+    data0$A <- 0
+
+    list(
+      m = predict(m_fit, newdata = data),
+      m1 = predict(m_fit, newdata = data1),
+      m0 = predict(m_fit, newdata = data0),
+      g = predict(g_fit, newdata = data, type = "response")
+    )
+  }
+)
+
+fit_att <- riesz_estimate(df, rc_att)
+fit_att
+
+c(
+  estimate_att = fit_att$estimate,
+  truth_att = truth_att
+)
+```
+
+```{r}
+
+```

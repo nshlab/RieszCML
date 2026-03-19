@@ -1,0 +1,278 @@
+---
+title: "Average derivative effects in subgroups"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Average derivative effects in subgroups}
+  %\VignetteEngine{knitr::rmarkdown}
+  \usepackage[utf8]{inputenc}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+## Overview 
+
+This vignette illustrates how the RieszCML framework can represent an average derivative effect (ADE) within a subgroup.
+
+The target parameter is
+$$\psi = \mathbb{E}\left[
+\frac{\partial}{\partial a} \mathbb{E}[Y \mid A = a, L]
+\;\middle|\;
+V = 1
+\right],
+$$
+where $V$ defines a subgroup of interest. 
+Equivalently, 
+$$\psi
+=
+\frac{1}{P(V=1)}
+\mathbb{E}\left[
+I(V=1)
+\frac{\partial}{\partial a} m(A,L)
+\right],$$
+$$m(a,L) = \mathbb{E}[Y \mid A=a, L].$$
+The Riesz representer is 
+$$\alpha(O)
+=
+\frac{I(V=1)}{P(V=1)}
+\frac{\partial}{\partial a}\log p(A \mid L),$$
+and the corresponding uncentered influence function has the form
+$$\phi(O)
+=
+h(O) + \alpha(O)\{Y - f(O)\},$$
+with 
+$$f(O) = m(A,L),
+\qquad
+h(O) = \frac{I(V=1)}{P(V=1)} \frac{\partial}{\partial a} m(A,L).$$
+
+```{r}
+library(RieszCML)
+
+set.seed(21)
+
+n <- 5000
+
+beta0 <- 1.0
+beta1 <- 2.5
+beta2 <- 1.2
+sigma <- 0.5
+
+L <- rnorm(n)
+A <- rnorm(n, mean = L, sd = 1)
+V <- as.integer(L > 0)
+Y <- beta0 + beta1 * A + beta2 * L + rnorm(n, sd = sigma)
+
+df <- data.frame(L = L, A = A, V = V, Y = Y)
+
+truth_subgroup_ade <- beta1
+truth_subgroup_ade
+
+rc_subgroup_ade <- RieszCurve$new(
+  nuis = function(data) {
+    outcome_fit <- lm(Y ~ A + L, data = data)
+    exposure_fit <- lm(A ~ L, data = data)
+
+    m_hat <- predict(outcome_fit, newdata = data)
+
+    beta1_hat <- unname(coef(outcome_fit)[["A"]])
+    dm_da_hat <- rep(beta1_hat, nrow(data))
+
+    muA_hat <- predict(exposure_fit, newdata = data)
+    sigma2_hat <- summary(exposure_fit)$sigma^2
+
+    # score_a = d/da log p(A|L) for Gaussian A|L
+    score_a_hat <- -(data$A - muA_hat) / sigma2_hat
+
+    pv_hat <- mean(data$V == 1)
+
+    list(
+      m = m_hat,
+      dm_da = dm_da_hat,
+      score_a = score_a_hat,
+      pv = pv_hat
+    )
+  },
+  alpha = ~ I(V == 1) / pv * score_a,
+  f = ~ m,
+  h = ~ I(V == 1) / pv * dm_da,
+  ic_expr = ~ h + alpha * (Y - f)
+)
+
+fit_subgroup_ade <- riesz_estimate(df, rc_subgroup_ade)
+fit_subgroup_ade
+
+c(
+  estimate = fit_subgroup_ade$estimate,
+  truth = truth_subgroup_ade
+)
+```
+
+## Variable Derivative Example
+
+```{r}
+set.seed(22)
+
+n <- 5000
+
+beta0 <- 1.0
+beta1 <- 1.5
+beta2 <- 0.8
+beta3 <- 1.2
+sigma <- 0.5
+
+L <- rnorm(n)
+A <- rnorm(n, mean = L, sd = 1)
+V <- as.integer(L > 0)
+Y <- beta0 + (beta1 + beta3 * L) * A + beta2 * L + rnorm(n, sd = sigma)
+
+df2 <- data.frame(L = L, A = A, V = V, Y = Y)
+
+truth_subgroup_ade_hetero <- beta1 + beta3 * sqrt(2 / pi)
+truth_subgroup_ade_hetero
+
+rc_subgroup_ade_hetero <- RieszCurve$new(
+  nuis = function(data) {
+    outcome_fit <- lm(Y ~ A + L + A:L, data = data)
+    exposure_fit <- lm(A ~ L, data = data)
+
+    m_hat <- predict(outcome_fit, newdata = data)
+
+    betaA_hat <- unname(coef(outcome_fit)[["A"]])
+    betaAL_hat <- unname(coef(outcome_fit)[["A:L"]])
+    dm_da_hat <- betaA_hat + betaAL_hat * data$L
+
+    muA_hat <- predict(exposure_fit, newdata = data)
+    sigma2_hat <- summary(exposure_fit)$sigma^2
+    score_a_hat <- -(data$A - muA_hat) / sigma2_hat
+
+    pv_hat <- mean(data$V == 1)
+
+    list(
+      m = m_hat,
+      dm_da = dm_da_hat,
+      score_a = score_a_hat,
+      pv = pv_hat
+    )
+  },
+  alpha = ~ I(V == 1) / pv * score_a,
+  f = ~ m,
+  h = ~ I(V == 1) / pv * dm_da,
+  ic_expr = ~ h + alpha * (Y - f)
+)
+
+fit_subgroup_ade_hetero <- riesz_estimate(df2, rc_subgroup_ade_hetero)
+fit_subgroup_ade_hetero
+
+c(
+  estimate = fit_subgroup_ade_hetero$estimate,
+  truth = truth_subgroup_ade_hetero
+)
+```
+
+
+## Numerically Estimated Derivative
+
+
+```{r}
+# ------------------------------------------------------------
+# Subgroup ADE with numerical approximation of dm/da
+# ------------------------------------------------------------
+
+library(RieszCML)
+
+set.seed(22)
+
+n <- 5000
+
+# Data-generating mechanism
+L <- rnorm(n)
+A <- rnorm(n, mean = 0.5 * L, sd = 1)
+V <- as.integer(L > 0)
+
+# Nonlinear outcome regression in A
+# m(a, l) = 1 + sin(a) + 0.5 * a * l + 0.3 * l^2
+Y <- 1 + sin(A) + 0.5 * A * L + 0.3 * L^2 + rnorm(n, sd = 0.3)
+
+df <- data.frame(L = L, A = A, V = V, Y = Y)
+
+# ------------------------------------------------------------
+# Truth
+# ------------------------------------------------------------
+# Here,
+# d/da m(a,l) = cos(a) + 0.5 * l
+#
+# So the subgroup ADE is
+# E[ cos(A) + 0.5 * L | V = 1 ]
+#
+# Since A | L ~ N(0.5 L, 1), there is no simple closed form for
+# E[cos(A) | L > 0], so for the "truth" we approximate with a very large
+# Monte Carlo sample from the known DGP.
+
+truth_mc_n <- 2e6
+L_big <- rnorm(truth_mc_n)
+A_big <- rnorm(truth_mc_n, mean = 0.5 * L_big, sd = 1)
+V_big <- as.integer(L_big > 0)
+
+truth_subgroup_ade <- mean((cos(A_big) + 0.5 * L_big)[V_big == 1])
+truth_subgroup_ade
+
+nuis_subgroup_ade_numeric <- function(data, delta = 1e-4) {
+  # Flexible working model for E[Y | A, L]
+  # Here I use a simple spline basis in A and L to mimic a realistic workflow.
+  outcome_fit <- lm(
+    Y ~ splines::bs(A, df = 6) + splines::bs(L, df = 5) + A:L,
+    data = data
+  )
+
+  # Predict m(A, L)
+  m_hat <- predict(outcome_fit, newdata = data)
+
+  # Numerically approximate dm/da using centered finite differences
+  data_plus <- data
+  data_minus <- data
+  data_plus$A <- data_plus$A + delta
+  data_minus$A <- data_minus$A - delta
+
+  m_plus <- predict(outcome_fit, newdata = data_plus)
+  m_minus <- predict(outcome_fit, newdata = data_minus)
+
+  dm_da_hat <- (m_plus - m_minus) / (2 * delta)
+
+  # Exposure score term for Gaussian A | L
+  exposure_fit <- lm(A ~ L, data = data)
+  muA_hat <- predict(exposure_fit, newdata = data)
+  sigma2_hat <- summary(exposure_fit)$sigma^2
+
+  # score_a = d/da log p(A | L)
+  score_a_hat <- -(data$A - muA_hat) / sigma2_hat
+
+  pv_hat <- mean(data$V == 1)
+
+  list(
+    m = m_hat,
+    dm_da = dm_da_hat,
+    score_a = score_a_hat,
+    pv = pv_hat
+  )
+}
+
+rc_subgroup_ade_numeric <- RieszCurve$new(
+  nuis = nuis_subgroup_ade_numeric,
+  alpha = ~ I(V == 1) / pv * score_a,
+  f = ~ m,
+  h = ~ I(V == 1) / pv * dm_da,
+  ic_expr = ~ h + alpha * (Y - f)
+)
+
+fit_subgroup_ade_numeric <- riesz_estimate(df, rc_subgroup_ade_numeric)
+fit_subgroup_ade_numeric
+
+c(
+  estimate = fit_subgroup_ade_numeric$estimate,
+  truth = truth_subgroup_ade
+)
+```

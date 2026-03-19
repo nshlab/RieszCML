@@ -1,0 +1,203 @@
+---
+title: "Delta-method contrasts with RieszCML"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Delta-method contrasts with RieszCML}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library(RieszCML)
+```
+
+```{r}
+set.seed(1)
+
+n <- 10000
+L <- rnorm(n)
+A <- rbinom(n, 1, plogis(0.5 * L))
+Y <- rbinom(n, 1, plogis(-0.3 + 0.7 * A + 0.4 * L))
+
+df <- data.frame(L = L, A = A, Y = Y)
+
+rc_mu1 <- riesz_curve_catalog$cfmean_a(
+  A = "A",
+  a = 1,
+  nuis = function(data) {
+    m_fit <- glm(Y ~ L + A, family = binomial(), data = data)
+    g_fit <- glm(I(A == 1) ~ L, family = binomial(), data = data)
+
+    data1 <- data
+    data1$A <- 1
+
+    list(
+      m = predict(m_fit, newdata = data, type = "response"),
+      ma = predict(m_fit, newdata = data1, type = "response"),
+      g = predict(g_fit, newdata = data, type = "response")
+    )
+  }
+)
+
+rc_mu0 <- riesz_curve_catalog$cfmean_a(
+  A = "A",
+  a = 0,
+  nuis = function(data) {
+    m_fit <- glm(Y ~ L + A, family = binomial(), data = data)
+    g_fit <- glm(I(A == 0) ~ L, family = binomial(), data = data)
+
+    data0 <- data
+    data0$A <- 0
+
+    list(
+      m = predict(m_fit, newdata = data, type = "response"),
+      ma = predict(m_fit, newdata = data0, type = "response"),
+      g = predict(g_fit, newdata = data, type = "response")
+    )
+  }
+)
+```
+
+```{r}
+fit_mu1 <- riesz_tmle(
+  data = df,
+  rc = rc_mu1,
+  fluctuation = "logistic",
+  bounds = c(0, 1),
+  outcome_col = "Y"
+)
+
+fit_mu0 <- riesz_tmle(
+  data = df,
+  rc = rc_mu0,
+  fluctuation = "logistic",
+  bounds = c(0, 1),
+  outcome_col = "Y"
+)
+
+fit_mu1
+fit_mu0
+```
+
+
+Before we go on to use the delta method, we will first use the DGP itself
+to calculate the true parameter values. 
+
+```{r}
+# DGP parameters from the example
+beta0 <- -0.3
+betaA <-  0.7
+betaL <-  0.4
+
+# Counterfactual mean under treatment level a
+mu_a_truth <- function(a,
+                       beta0 = -0.3,
+                       betaA = 0.7,
+                       betaL = 0.4) {
+  integrand <- function(l) {
+    expit(beta0 + betaA * a + betaL * l) * stats::dnorm(l)
+  }
+
+  stats::integrate(
+    f = integrand,
+    lower = -Inf,
+    upper = Inf
+  )$value
+}
+
+mu1_true <- mu_a_truth(1, beta0 = beta0, betaA = betaA, betaL = betaL)
+mu0_true <- mu_a_truth(0, beta0 = beta0, betaA = betaA, betaL = betaL)
+
+ate_true <- mu1_true - mu0_true
+rr_true <- mu1_true / mu0_true
+log_rr_true <- log(rr_true)
+
+or_true <- (mu1_true / (1 - mu1_true)) / (mu0_true / (1 - mu0_true))
+log_or_true <- log(or_true)
+
+truths <- list(
+  mu1 = mu1_true,
+  mu0 = mu0_true,
+  ate = ate_true,
+  rr = rr_true,
+  log_rr = log_rr_true,
+  or = or_true,
+  log_or = log_or_true
+)
+
+truths
+```
+
+## First example: ATE
+
+
+```{r}
+fit_ate <- riesz_delta_difference(
+  fit_mu1,
+  fit_mu0,
+  parameter = "ATE = E[Y^1] - E[Y^0]"
+)
+
+fit_ate
+message("truth: ", round(truths$ate, 4))
+```
+
+
+## Second example: Risk Ratio
+
+```{r}
+fit_rr <- riesz_delta_ratio(
+  fit_mu1,
+  fit_mu0,
+  parameter = "Risk ratio = E[Y^1] / E[Y^0]"
+)
+
+fit_rr
+message("truth: ", round(truths$rr, 4))
+```
+
+### Risk Ratio on Log Scale
+
+```{r}
+fit_log_rr <- riesz_delta_log_ratio(
+  fit_mu1,
+  fit_mu0,
+  parameter = "Log risk ratio"
+)
+
+fit_log_rr
+message("truth: ", round(truths$log_rr, 4))
+```
+
+## Odds Ratio 
+
+```{r}
+fit_or <- riesz_delta_odds_ratio(
+  fit_mu1,
+  fit_mu0,
+  parameter = "Odds ratio"
+)
+
+fit_or
+message("truth: ", round(truths$or, 4))
+```
+
+### Log Odds Ratio
+
+```{r}
+fit_log_or <- riesz_delta_log_odds_ratio(
+  fit_mu1,
+  fit_mu0,
+  parameter = "Log odds ratio"
+)
+
+fit_log_or
+message("truth: ", round(truths$log_or, 4))
+```

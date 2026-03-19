@@ -1,7 +1,8 @@
 
 #' Estimate a Statistical Parameter using a RieszCurve
 #'
-#'@examples
+#' @export
+#' @examples
 #'
 #' rc_ate <- RieszCurve$new(
 #'   nuis = function(data) {
@@ -38,22 +39,35 @@
 #'
 #'
 riesz_estimate <- function(data, rc, significance_alpha = 0.05) {
-  if (! inherits(rc, "RieszCurve") & ! inherits(rc, "ComposedRieszCurve")) {
-    stop("rc must be a RieszCurve or ComposedRieszCurve.")
+  if (!inherits(rc, "RieszCurve") && !inherits(rc, "ComposedRieszCurve")) {
+    stop("`rc` must be a RieszCurve or ComposedRieszCurve.")
   }
 
-  if (inherits(rc, 'RieszCurve') || inherits(rc, 'ComposedRieszCurve')) {
-    rc$fit(data)
-    phi <- rc$fit_ic
+  rc$fit(data)
+  phi <- rc$fit_ic
 
-    estimate <- mean(phi)
-    var_estimate <- var(phi)/nrow(data)
-    se <- sqrt(var_estimate)
-    ci_low <- estimate + se * qnorm(significance_alpha / 2)
-    ci_high <- estimate + se * qnorm(1 - significance_alpha / 2)
-
-    return(list(
-      estimate = estimate, var = var_estimate, se = se, ci_low = ci_low, ci_high = ci_high
-    ))
+  if (is.null(phi)) {
+    stop("After `rc$fit(data)`, `rc$fit_ic` is NULL.")
   }
+  if (!is.numeric(phi) || length(phi) != nrow(data)) {
+    stop("`rc$fit_ic` must be a numeric vector of length nrow(data).")
+  }
+
+  estimate <- mean(phi)
+  var_estimate <- stats::var(phi) / nrow(data)
+  se <- sqrt(var_estimate)
+  ci_low <- estimate + se * stats::qnorm(significance_alpha / 2)
+  ci_high <- estimate + se * stats::qnorm(1 - significance_alpha / 2)
+
+  RieszFit$new(
+    estimate = estimate,
+    var = var_estimate,
+    se = se,
+    ci_low = ci_low,
+    ci_high = ci_high,
+    significance_alpha = significance_alpha,
+    estimator = "one-step",
+    n = nrow(data),
+    ic = phi
+  )
 }

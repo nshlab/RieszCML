@@ -1,0 +1,346 @@
+---
+title: "Composed-Riesz-Missingness-and-Longitudinal"
+output: html_document
+---
+
+One of the main motivations for the RieszCML framework is that many interesting estimands can be built compositionally from simpler ones.
+
+This vignette illustrates that idea with three examples:
+
+  - ATE with missing outcome under MAR as a two-stage procedure,
+  - a two-timepoint longitudinal regime mean as a composed object,
+  - a longitudinal regime contrast with missing final outcome as a three-stage composed object plus delta method.
+
+```{r}
+library(RieszCML)
+```
+
+## ATE under MAR 
+
+```{r}
+
+set.seed(11)
+
+n <- 5000
+tau <- 1.5
+sigma <- 0.25
+
+L <- rnorm(n)
+A <- rbinom(n, 1, plogis(L))
+Y_full <- 2 + L + tau * A + rnorm(n, sd = sigma)
+R <- rbinom(n, 1, plogis(-0.5 + 0.5 * L + 0.3 * A))
+
+Y <- ifelse(R == 1, Y_full, 0)
+
+df <- data.frame(L = L, A = A, R = R, Y = Y)
+
+truth_mu1 <- 2 + tau
+truth_mu0 <- 2
+truth_ate <- tau
+
+c(truth_mu1 = truth_mu1, truth_mu0 = truth_mu0, truth_ate = truth_ate)
+```
+
+```{r}
+rc_missing <- riesz_curve_catalog$missing_mean(
+  L = "L",
+  R = "R",
+  Y = "Y",
+  nuis = function(data) {
+    obs <- data[data$R == 1, , drop = FALSE]
+
+    m_fit <- lm(Y ~ L + A, data = obs)
+    pi_fit <- glm(R ~ L + A, family = binomial(), data = data)
+
+    list(
+      m = predict(m_fit, newdata = data),
+      pi = predict(pi_fit, newdata = data, type = "response")
+    )
+  }
+)
+
+make_rc_treatment_mean <- function(a) {
+  alpha_formula <- as.formula(paste0("~ I(A == ", a, ")/g"))
+
+  RieszCurve$new(
+    nuis = function(data) {
+      m_fit <- lm(`h[j=1]` ~ L + A, data = data)
+      g_fit <- glm(I(A == a) ~ L, family = binomial(), data = data)
+
+      data_a <- data
+      data_a$A <- a
+
+      list(
+        m = predict(m_fit, newdata = data),
+        ma = predict(m_fit, newdata = data_a),
+        g = predict(g_fit, newdata = data, type = "response")
+      )
+    },
+    alpha = alpha_formula,
+    f = ~ m,
+    h = ~ ma,
+    ic_expr = ~ h + alpha * (`h[j=1]` - f)
+  )
+}
+
+rc_mu1_composed <- ComposedRieszCurve$new(
+  rc_list = list(
+    rc_missing,
+    make_rc_treatment_mean(a = 1)
+  )
+)
+
+rc_mu0_composed <- ComposedRieszCurve$new(
+  rc_list = list(
+    rc_missing,
+    make_rc_treatment_mean(a = 0)
+  )
+)
+
+fit_mu1 <- riesz_estimate(df, rc_mu1_composed)
+fit_mu0 <- riesz_estimate(df, rc_mu0_composed)
+
+fit_mu1
+fit_mu0
+
+fit_ate <- riesz_delta_difference(
+  fit_mu1,
+  fit_mu0,
+  parameter = "ATE with MAR outcome missingness"
+)
+
+fit_ate
+
+c(
+  estimate_mu1 = fit_mu1$estimate,
+  truth_mu1 = truth_mu1,
+  estimate_mu0 = fit_mu0$estimate,
+  truth_mu0 = truth_mu0,
+  estimate_ate = fit_ate$estimate,
+  truth_ate = truth_ate
+)
+```
+
+## Example 2: Two-Timepoint Longitudinal Mean
+
+```{r}
+set.seed(12)
+
+n <- 5000
+
+beta0 <- 0.5
+beta1 <- 0.7
+beta2 <- 2.0
+
+theta0 <- 1.0
+theta2 <- 1.5
+theta3 <- 3.0
+
+L1 <- rnorm(n)
+A1 <- rbinom(n, 1, plogis(-0.2 + 1.0 * L1))
+U2 <- rnorm(n)
+L2 <- beta0 + beta1 * L1 + beta2 * A1 + U2
+A2 <- rbinom(n, 1, plogis(-0.3 + 0.6 * A1 + 1.2 * L2))
+Y <- theta0 + theta2 * L2 + theta3 * A2 + rnorm(n)
+
+df_long <- data.frame(L1 = L1, A1 = A1, L2 = L2, A2 = A2, Y = Y)
+
+truth_mu11 <- theta0 + theta2 * (beta0 + beta2) + theta3
+truth_mu11
+
+rc_A2_1 <- RieszCurve$new(
+  nuis = function(data) {
+    m_fit <- lm(Y ~ L1 + A1 + L2 + A2, data = data)
+    g_fit <- glm(A2 ~ L1 + A1 + L2, family = binomial(), data = data)
+
+    data1 <- data
+    data1$A2 <- 1
+
+    list(
+      m = predict(m_fit, newdata = data),
+      m1 = predict(m_fit, newdata = data1),
+      g = predict(g_fit, newdata = data, type = "response")
+    )
+  },
+  h = ~ m1,
+  f = ~ m,
+  alpha = ~ A2 / g,
+  ic_expr = ~ h + alpha * (Y - f)
+)
+
+rc_A1_1 <- RieszCurve$new(
+  nuis = function(data) {
+    m_fit <- lm(`h[j=1]` ~ L1 + A1, data = data)
+    g_fit <- glm(A1 ~ L1, family = binomial(), data = data)
+
+    data1 <- data
+    data1$A1 <- 1
+
+    list(
+      m = predict(m_fit, newdata = data),
+      m1 = predict(m_fit, newdata = data1),
+      g = predict(g_fit, newdata = data, type = "response")
+    )
+  },
+  h = ~ m1,
+  f = ~ m,
+  alpha = ~ A1 / g,
+  ic_expr = ~ h + alpha * (`h[j=1]` - f)
+)
+
+rc_mu11 <- ComposedRieszCurve$new(
+  rc_list = list(rc_A2_1, rc_A1_1)
+)
+
+fit_mu11 <- riesz_estimate(df_long, rc_mu11)
+fit_mu11
+
+c(
+  estimate_mu11 = fit_mu11$estimate,
+  truth_mu11 = truth_mu11
+)
+```
+
+## Example 3: Longitudinal Regime with Missing Final Outcome
+
+
+```{r}
+set.seed(13)
+
+n <- 5000
+
+beta0 <- 0.5
+beta1 <- 0.7
+beta2 <- 2.0
+
+theta0 <- 1.0
+theta2 <- 1.5
+theta3 <- 0.8
+theta4 <- 2.2
+
+L1 <- rnorm(n)
+A1 <- rbinom(n, 1, plogis(-0.2 + 1.0 * L1))
+U2 <- rnorm(n)
+L2 <- beta0 + beta1 * L1 + beta2 * A1 + U2
+A2 <- rbinom(n, 1, plogis(-0.3 + 0.6 * A1 + 1.2 * L2))
+
+Y_full <- theta0 + theta2 * L2 + theta3 * A1 + theta4 * A2 + rnorm(n)
+R <- rbinom(n, 1, plogis(-0.4 + 0.3 * L1 + 0.2 * A1 + 0.4 * L2 + 0.2 * A2))
+Y <- ifelse(R == 1, Y_full, 0)
+
+df_long_miss <- data.frame(L1 = L1, A1 = A1, L2 = L2, A2 = A2, R = R, Y = Y)
+
+truth_mu11 <- theta0 + theta2 * (beta0 + beta2 * 1) + theta3 * 1 + theta4 * 1
+truth_mu00 <- theta0 + theta2 * (beta0 + beta2 * 0) + theta3 * 0 + theta4 * 0
+truth_contrast <- truth_mu11 - truth_mu00
+
+c(
+  truth_mu11 = truth_mu11,
+  truth_mu00 = truth_mu00,
+  truth_contrast = truth_contrast
+)
+
+rc_R <- riesz_curve_catalog$missing_mean(
+  L = "L1",
+  R = "R",
+  Y = "Y",
+  nuis = function(data) {
+    obs <- data[data$R == 1, , drop = FALSE]
+
+    m_fit <- lm(Y ~ L1 + A1 + L2 + A2, data = obs)
+    pi_fit <- glm(R ~ L1 + A1 + L2 + A2, family = binomial(), data = data)
+
+    list(
+      m = predict(m_fit, newdata = data),
+      pi = predict(pi_fit, newdata = data, type = "response")
+    )
+  }
+)
+
+make_rc_A2 <- function(a2) {
+  alpha_formula <- as.formula(paste0("~ I(A2 == ", a2, ")/g"))
+
+  RieszCurve$new(
+    nuis = function(data) {
+      m_fit <- lm(`h[j=1]` ~ L1 + A1 + L2 + A2, data = data)
+      g_fit <- glm(I(A2 == a2) ~ L1 + A1 + L2, family = binomial(), data = data)
+
+      data_a2 <- data
+      data_a2$A2 <- a2
+
+      list(
+        m = predict(m_fit, newdata = data),
+        ma = predict(m_fit, newdata = data_a2),
+        g = predict(g_fit, newdata = data, type = "response")
+      )
+    },
+    alpha = alpha_formula,
+    f = ~ m,
+    h = ~ ma,
+    ic_expr = ~ h + alpha * (`h[j=1]` - f)
+  )
+}
+
+make_rc_A1 <- function(a1) {
+  alpha_formula <- as.formula(paste0("~ I(A1 == ", a1, ")/g"))
+
+  RieszCurve$new(
+    nuis = function(data) {
+      m_fit <- lm(`h[j=2]` ~ L1 + A1, data = data)
+      g_fit <- glm(I(A1 == a1) ~ L1, family = binomial(), data = data)
+
+      data_a1 <- data
+      data_a1$A1 <- a1
+
+      list(
+        m = predict(m_fit, newdata = data),
+        ma = predict(m_fit, newdata = data_a1),
+        g = predict(g_fit, newdata = data, type = "response")
+      )
+    },
+    alpha = alpha_formula,
+    f = ~ m,
+    h = ~ ma,
+    ic_expr = ~ h + alpha * (`h[j=2]` - f)
+  )
+}
+
+rc_mu11 <- ComposedRieszCurve$new(
+  rc_list = list(
+    rc_R,
+    make_rc_A2(a2 = 1),
+    make_rc_A1(a1 = 1)
+  )
+)
+
+rc_mu00 <- ComposedRieszCurve$new(
+  rc_list = list(
+    rc_R,
+    make_rc_A2(a2 = 0),
+    make_rc_A1(a1 = 0)
+  )
+)
+
+fit_mu11 <- riesz_estimate(df_long_miss, rc_mu11)
+fit_mu00 <- riesz_estimate(df_long_miss, rc_mu00)
+
+fit_mu11
+fit_mu00
+
+fit_regime_contrast <- riesz_delta_difference(
+  fit_mu11,
+  fit_mu00,
+  parameter = "E[Y^(1,1)] - E[Y^(0,0)] with MAR final outcome"
+)
+
+fit_regime_contrast
+
+c(
+  estimate_mu11 = fit_mu11$estimate,
+  truth_mu11 = truth_mu11,
+  estimate_mu00 = fit_mu00$estimate,
+  truth_mu00 = truth_mu00,
+  estimate_contrast = fit_regime_contrast$estimate,
+  truth_contrast = truth_contrast
+)
+```

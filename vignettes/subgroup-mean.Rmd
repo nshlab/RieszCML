@@ -1,0 +1,111 @@
+---
+title: "Subgroup means with riesz_curve_catalog"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Subgroup means with riesz_curve_catalog}
+  %\VignetteEngine{knitr::rmarkdown}
+  \usepackage[utf8]{inputenc}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+
+## Subgroup means with `riesz_curve_catalog`
+
+This example estimates the observational subgroup mean
+
+\[
+\psi(v) = \mathbb E[Y \mid V=v].
+\]
+
+We simulate
+
+\[
+V \sim \text{Bernoulli}(0.4),
+\qquad
+Y = 1 + 2V + \varepsilon,
+\qquad
+\varepsilon \sim N(0,\sigma^2).
+\]
+
+Therefore,
+
+\[
+\mathbb E[Y \mid V=0] = 1,
+\qquad
+\mathbb E[Y \mid V=1] = 3.
+\]
+
+```{r}
+library(RieszCML)
+
+set.seed(2)
+
+n <- 5000
+sigma <- 0.25
+
+V <- rbinom(n, size = 1, prob = 0.4)
+Y <- 1 + 2 * V + rnorm(n, sd = sigma)
+
+df <- data.frame(V = V, Y = Y)
+
+truth_subgroup_mean_v1 <- 3
+truth_subgroup_mean_v0 <- 1
+
+rc_subgroup_mean_v1 <- riesz_curve_catalog$subgroup_mean(
+  V = "V",
+  v = 1,
+  Y = "Y",
+  nuis = function(data) {
+    m_fit <- lm(Y ~ V, data = data)
+
+    data_v1 <- data
+    data_v1$V <- 1
+
+    list(
+      m = predict(m_fit, newdata = data),
+      mv = predict(m_fit, newdata = data_v1),
+      pv = mean(data$V == 1)
+    )
+  }
+)
+
+fit_subgroup_mean_v1 <- riesz_estimate(df, rc_subgroup_mean_v1)
+fit_subgroup_mean_v1
+
+rc_subgroup_mean_v0 <- riesz_curve_catalog$subgroup_mean(
+  V = "V",
+  v = 0,
+  Y = "Y",
+  nuis = function(data) {
+    m_fit <- lm(Y ~ V, data = data)
+
+    data_v0 <- data
+    data_v0$V <- 0
+
+    list(
+      m = predict(m_fit, newdata = data),
+      mv = predict(m_fit, newdata = data_v0),
+      pv = mean(data$V == 0)
+    )
+  }
+)
+
+fit_subgroup_mean_v0 <- riesz_estimate(df, rc_subgroup_mean_v0)
+fit_subgroup_mean_v0
+
+c(
+  estimate = fit_subgroup_mean_v0$estimate,
+  truth = truth_subgroup_mean_v0
+)
+
+c(
+  estimate = fit_subgroup_mean_v1$estimate,
+  truth = truth_subgroup_mean_v1
+)
+```

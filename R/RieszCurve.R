@@ -19,6 +19,7 @@
 #'     uncentered influence curve to use in IF-based estimation.
 #'     Often \code{ ~ h - alpha * (Y - f) }.
 #'
+#' @export
 #' @examples
 #' rc_ate <- RieszCurve$new(
 #'   nuis = function(data) {
@@ -42,6 +43,7 @@
 #'   h = ~ m1 - m0,
 #'   ic_expr = ~ h + alpha * (Y - f)
 #' )
+#' rc_ate
 #'
 #' df <- tibble::tibble(
 #'   L = rnorm(n = 50),
@@ -53,7 +55,7 @@
 #'
 #' rc_ate$fit(data = df)
 #' mean(rc_ate$fit_ic)
-#'
+#' rc_ate
 RieszCurve <- R6::R6Class(
   classname = 'RieszCurve',
   portable = TRUE,
@@ -156,6 +158,51 @@ RieszCurve <- R6::R6Class(
       }
 
       return(invisible(NULL))
+    },
+
+    print = function(...) {
+
+      cat("RieszCurve object\n")
+      cat("-----------------\n")
+
+      # Helper to format formulas nicely
+      fmt_formula <- function(x) {
+        if (inherits(x, "formula")) {
+          paste(deparse(x), collapse = "")
+        } else if (is.character(x)) {
+          x
+        } else {
+          paste0("<", class(x)[1], ">")
+        }
+      }
+
+      cat("Components:\n")
+
+      cat("  alpha:  ", fmt_formula(self$alpha), "\n", sep = "")
+      cat("  f:      ", fmt_formula(self$f), "\n", sep = "")
+      cat("  h:      ", fmt_formula(self$h), "\n", sep = "")
+      cat("  ic:     ", fmt_formula(self$ic_expr), "\n", sep = "")
+
+      # Nuisance info (don’t print function body)
+      cat("\nNuisance specification: \n")
+      if (is.function(self$nuis)) {
+        cat("  nuis: <function>\n")
+      } else if (is.list(self$nuis)) {
+        cat("  nuis: <list of precomputed vectors>\n")
+        cat("    names: ", paste(names(self$nuis), collapse = ", "), "\n", sep = "")
+      } else {
+        cat("  nuis: <", class(self$nuis)[1], ">\n", sep = "")
+      }
+
+      # If fitted, show summary of IC
+      if (!is.null(self$fit_ic)) {
+        cat("\nFit summary:\n")
+        cat("  n: ", length(self$fit_ic), "\n", sep = "")
+        cat("  mean(IC): ", formatC(mean(self$fit_ic), digits = 4, format = "f"), "\n", sep = "")
+        cat("  sd(IC):   ", formatC(stats::sd(self$fit_ic), digits = 4, format = "f"), "\n", sep = "")
+      }
+
+      invisible(self)
     }
   )
 )

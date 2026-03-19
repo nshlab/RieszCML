@@ -1,4 +1,4 @@
-
+#' @export
 #' @examples
 #' rc1 <- RieszCurve$new(
 #'   nuis = function(data) {
@@ -102,12 +102,7 @@
 #' rc_composed$fit(df)
 #' mean(rc_composed$fit_ic)
 #' var(rc_composed$fit_ic)/nrow(df)
-#'
 #' riesz_estimate(df, rc_composed)
-#'
-#' # What did we learn:
-#' # riesz representers have to be fit in calculation order
-#' # 1st is a regression on Y but all after are on h_{j-1}
 ComposedRieszCurve <- R6::R6Class(
   classname = 'ComposedRieszCurve',
   portable = TRUE,
@@ -153,7 +148,80 @@ ComposedRieszCurve <- R6::R6Class(
       }
 
       return(invisible(NULL))
+      },
+
+    print = function(...) {
+
+      cat("ComposedRieszCurve object\n")
+      cat("------------------------\n")
+
+      J <- length(self$rc_list)
+
+      cat("Stages: ", J, "\n", sep = "")
+      cat("Status: ",
+          if (!is.null(self$fit_ic)) "fitted" else "not yet fitted",
+          "\n", sep = "")
+
+      fmt_formula <- function(x) {
+        if (inherits(x, "formula")) {
+          paste(deparse(x), collapse = "")
+        } else if (is.character(x)) {
+          x
+        } else if (is.numeric(x)) {
+          "<numeric>"
+        } else if (is.null(x)) {
+          "<NULL>"
+        } else {
+          paste0("<", class(x)[1], ">")
+        }
       }
+
+      cat("\nPipeline:\n")
+
+      for (j in seq_len(J)) {
+        rcj <- self$rc_list[[j]]
+
+        cat("\n")
+        cat("  Stage ", j, "\n", sep = "")
+        cat("  ", strrep("~", 8), "\n", sep = "")
+
+        cat("    alpha: ", fmt_formula(rcj$alpha), "\n", sep = "")
+        cat("    f:     ", fmt_formula(rcj$f), "\n", sep = "")
+        cat("    h:     ", fmt_formula(rcj$h), "\n", sep = "")
+
+        if (!is.null(rcj$ic_expr)) {
+          cat("    ic:    ", fmt_formula(rcj$ic_expr), "\n", sep = "")
+        }
+
+        if (is.function(rcj$nuis)) {
+          cat("    nuis:  <function>\n")
+        } else if (is.list(rcj$nuis)) {
+          cat("    nuis:  <list>")
+          if (!is.null(names(rcj$nuis)) && length(names(rcj$nuis)) > 0) {
+            cat(" [", paste(names(rcj$nuis), collapse = ", "), "]", sep = "")
+          }
+          cat("\n")
+        } else {
+          cat("    nuis:  <", class(rcj$nuis)[1], ">\n", sep = "")
+        }
+
+        stage_status <- !is.null(rcj$fit_h) || !is.null(rcj$fit_f) || !is.null(rcj$fit_alpha)
+        cat("    status: ", if (stage_status) "fit" else "not yet fit", "\n", sep = "")
+      }
+
+      cat("\nComposition rule:\n")
+      cat("  stage 1 acts on Y directly;\n")
+      cat("  each later stage acts on the previous stage's h.\n")
+
+      if (!is.null(self$fit_ic)) {
+        cat("\nFit summary:\n")
+        cat("  n: ", length(self$fit_ic), "\n", sep = "")
+        cat("  mean(IC): ", formatC(mean(self$fit_ic), digits = 4, format = "f"), "\n", sep = "")
+        cat("  sd(IC):   ", formatC(stats::sd(self$fit_ic), digits = 4, format = "f"), "\n", sep = "")
+      }
+
+      invisible(self)
+    }
 
   )
 )

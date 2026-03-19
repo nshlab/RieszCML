@@ -142,10 +142,5 @@ est_tmle <- riesz_tmle(
   use_intercept_and_weights = FALSE
 )
 
-cat("One-step estimate: ", est_onestep$estimate, "\n")
-cat("TMLE estimate:     ", est_tmle$estimate, "\n")
-cat("One-step SE:       ", est_onestep$se, "\n")
-cat("TMLE SE:           ", est_tmle$se, "\n")
-cat("One-step 95% CI:       [", est_onestep$ci_low, ", ", est_tmle$ci_high, "]\n", sep = "")
-cat("TMLE 95% CI:       [", est_tmle$ci_low, ", ", est_tmle$ci_high, "]\n", sep = "")
+est_tmle
 ```
