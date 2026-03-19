@@ -1,62 +1,3 @@
-.numeric_gradient <- function(g, theta, eps = 1e-6) {
-  if (!is.function(g)) stop("`g` must be a function.")
-  if (!is.numeric(theta) || length(theta) < 1L) {
-    stop("`theta` must be a numeric vector of length >= 1.")
-  }
-  if (!is.numeric(eps) || length(eps) != 1L || is.na(eps) || eps <= 0) {
-    stop("`eps` must be a positive numeric scalar.")
-  }
-
-  k <- length(theta)
-  grad <- numeric(k)
-
-  for (j in seq_len(k)) {
-    step <- rep(0, k)
-    step[j] <- eps
-    grad[j] <- (g(theta + step) - g(theta - step)) / (2 * eps)
-  }
-
-  grad
-}
-
-.validate_riesz_fits <- function(fits) {
-  if (!is.list(fits) || length(fits) < 1L) {
-    stop("`fits` must be a non-empty list of `RieszFit` objects.")
-  }
-
-  ok <- vapply(fits, function(x) inherits(x, "RieszFit"), logical(1))
-  if (!all(ok)) {
-    stop("All elements of `fits` must inherit from `RieszFit`.")
-  }
-
-  n_vec <- vapply(fits, function(x) length(x$ic), integer(1))
-  if (length(unique(n_vec)) != 1L) {
-    stop("All fits must have influence curves of the same length.")
-  }
-
-  invisible(NULL)
-}
-
-.extract_component_estimates <- function(fits) {
-  vapply(fits, function(x) x$estimate, numeric(1))
-}
-
-.extract_component_eif_matrix <- function(fits) {
-  # Use centered EIFs. Since `ic` is stored as an uncentered IC-like quantity,
-  # center it at the reported estimate.
-  eif_mat <- do.call(
-    cbind,
-    lapply(fits, function(x) {
-      if (is.null(x$ic)) {
-        stop("Each `RieszFit` must contain an `ic` component.")
-      }
-      as.numeric(x$ic - x$estimate)
-    })
-  )
-
-  colnames(eif_mat) <- paste0("theta", seq_len(ncol(eif_mat)))
-  eif_mat
-}
 
 #' @export
 riesz_delta <- function(...,
@@ -129,6 +70,72 @@ riesz_delta <- function(...,
     ic = ic_psi
   )
 }
+
+
+# helpers -----------------------------------------------------------------
+
+.numeric_gradient <- function(g, theta, eps = 1e-6) {
+  if (!is.function(g)) stop("`g` must be a function.")
+  if (!is.numeric(theta) || length(theta) < 1L) {
+    stop("`theta` must be a numeric vector of length >= 1.")
+  }
+  if (!is.numeric(eps) || length(eps) != 1L || is.na(eps) || eps <= 0) {
+    stop("`eps` must be a positive numeric scalar.")
+  }
+
+  k <- length(theta)
+  grad <- numeric(k)
+
+  for (j in seq_len(k)) {
+    step <- rep(0, k)
+    step[j] <- eps
+    grad[j] <- (g(theta + step) - g(theta - step)) / (2 * eps)
+  }
+
+  grad
+}
+
+.validate_riesz_fits <- function(fits) {
+  if (!is.list(fits) || length(fits) < 1L) {
+    stop("`fits` must be a non-empty list of `RieszFit` objects.")
+  }
+
+  ok <- vapply(fits, function(x) inherits(x, "RieszFit"), logical(1))
+  if (!all(ok)) {
+    stop("All elements of `fits` must inherit from `RieszFit`.")
+  }
+
+  n_vec <- vapply(fits, function(x) length(x$ic), integer(1))
+  if (length(unique(n_vec)) != 1L) {
+    stop("All fits must have influence curves of the same length.")
+  }
+
+  invisible(NULL)
+}
+
+.extract_component_estimates <- function(fits) {
+  vapply(fits, function(x) x$estimate, numeric(1))
+}
+
+.extract_component_eif_matrix <- function(fits) {
+  # Use centered EIFs. Since `ic` is stored as an uncentered IC-like quantity,
+  # center it at the reported estimate.
+  eif_mat <- do.call(
+    cbind,
+    lapply(fits, function(x) {
+      if (is.null(x$ic)) {
+        stop("Each `RieszFit` must contain an `ic` component.")
+      }
+      as.numeric(x$ic - x$estimate)
+    })
+  )
+
+  colnames(eif_mat) <- paste0("theta", seq_len(ncol(eif_mat)))
+  eif_mat
+}
+
+
+# common usages of delta method (differences, [log] RR, [log] OR) --------------
 
 #' @export
 riesz_delta_difference <- function(fit1,
