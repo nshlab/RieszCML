@@ -1,6 +1,8 @@
 
+#' @export
 logit <- qlogis
 
+#' @export
 expit <- plogis
 
 to01 <- function(x, bounds) {

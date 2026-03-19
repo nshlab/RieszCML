@@ -3,6 +3,8 @@
 export(ComposedRieszCurve)
 export(RieszCurve)
 export(RieszFit)
+export(expit)
+export(logit)
 export(riesz_curve_catalog)
 export(riesz_delta)
 export(riesz_delta_difference)

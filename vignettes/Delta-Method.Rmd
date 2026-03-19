@@ -29,7 +29,6 @@ Y <- rbinom(n, 1, plogis(-0.3 + 0.7 * A + 0.4 * L))
 df <- data.frame(L = L, A = A, Y = Y)
 
 rc_mu1 <- riesz_curve_catalog$cfmean_a(
-  A = "A",
   a = 1,
   nuis = function(data) {
     m_fit <- glm(Y ~ L + A, family = binomial(), data = data)
@@ -47,7 +46,6 @@ rc_mu1 <- riesz_curve_catalog$cfmean_a(
 )
 
 rc_mu0 <- riesz_curve_catalog$cfmean_a(
-  A = "A",
   a = 0,
   nuis = function(data) {
     m_fit <- glm(Y ~ L + A, family = binomial(), data = data)

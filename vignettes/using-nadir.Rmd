@@ -1,8 +1,8 @@
 ---
-title: "Super Learner, cross-fitting, and double cross-fitting"
+title: "Super Learner, cross-fitting"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{Super Learner, cross-fitting, and double cross-fitting}
+  %\VignetteIndexEntry{Super Learner, cross-fitting}
   %\VignetteEngine{knitr::rmarkdown}
   \usepackage[utf8]{inputenc}
 ---
@@ -81,9 +81,6 @@ truth_ate
 
 make_rc_ate <- function(nuis_fun) {
   riesz_curve_catalog$ate(
-    L = "L",
-    A = "A",
-    Y = "Y",
     nuis = nuis_fun
   )
 }
