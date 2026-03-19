@@ -43,9 +43,6 @@ c(truth_mu1 = truth_mu1, truth_mu0 = truth_mu0, truth_ate = truth_ate)
 
 ```{r}
 rc_missing <- riesz_curve_catalog$missing_mean(
-  L = "L",
-  R = "R",
-  Y = "Y",
   nuis = function(data) {
     obs <- data[data$R == 1, , drop = FALSE]
 
@@ -241,9 +238,6 @@ c(
 )
 
 rc_R <- riesz_curve_catalog$missing_mean(
-  L = "L1",
-  R = "R",
-  Y = "Y",
   nuis = function(data) {
     obs <- data[data$R == 1, , drop = FALSE]
 
