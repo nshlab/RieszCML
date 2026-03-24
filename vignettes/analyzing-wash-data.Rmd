@@ -1,6 +1,10 @@
+---
+title: "Analyzing-WASH-data"
+output: html_document
+---
 
-
-
+Load packages and the data
+```{R}
 library(devtools)
 load_all('/home/salbalkus/Research/RieszCML/')
 
@@ -14,44 +18,54 @@ wash <- read_csv(
     "wash-benefits/washb_data.csv"
   )
 )
-normalize <- function(v){(v - min(v)) / (max(v) - min(v))}
+```
 
-df = data.frame(Y = wash$whz, 
-                A1 = wash$momage,
-                L1 = wash$Nlt18,
-                A2 = ifelse(wash$tr == "Control", 1, 0),
-                L2 = wash$momedu) %>% drop_na()
+Let's look at the Bangladesh Wash Benefits study data. We are interested in the effect of maternal age (`momage`) on the outcome of weight-for-height Z-scores (`whz`). Note that maternal age is not a discrete variable, so we need to consider an estimand appropriate for this. We will consider a modified treatment policy $A + 1$. 
+```{R}
+head(wash)
+```
 
+Let's define a way to estimate this estimand for the entire dataset.
+```{R}
+df = wash %>% select(momage, momedu, momheight, Nlt18, watmin, hfiacat, tr, whz) %>%
+              rename(Y = whz) %>%
+              mutate(value = 1) %>% 
+              pivot_wider(names_from = tr, 
+                          values_from = value, 
+                          values_fill = 0) %>%
+              drop_na()
+```
+
+```{R}
 #---------------------------------------------
 # Stage 1 RieszCurve:
 #   parameter is E[Y | L1, A1] under intervention A2 = 1
 #---------------------------------------------
-rc1 <- RieszCurve$new(
+rc1 <- function(delta, treatment){return(RieszCurve$new(
   nuis = function(data) {
     # regression for Y given current history
-    m_fit <- glm(Y ~ L1 + A1 + L2 + A2,
+    m_fit <- glm(Y ~ momage + momedu + momheight + watmin + hfiacat + get(treatment) + Nlt18,
                  family = gaussian(),
                  data = data)
 
-    data_A2eq1 <- data
-    data_A2eq1$A2 <- 1
+    data_shift <- data %>% mutate(momage = momage + delta, "{treatment}" := 1)
 
     # treatment mechanism for A2
-    g_fit <- glm(A2 ~ L1 + A1 + L2,
+    g_fit <- glm(get(treatment) ~ momage + momedu + momheight + watmin + hfiacat + Nlt18,
                  family = binomial(),
                  data = data)
 
     list(
       m = predict(m_fit, newdata = data, type = "response"),
-      m1 = predict(m_fit, newdata = data_A2eq1, type = "response"),
-      g = predict(g_fit, newdata = data, type = "response")
+      m1 = predict(m_fit, newdata = data_shift, type = "response"),
+      invprop = data[[treatment]] / predict(g_fit, newdata = data, type = "response")
     )
   },
   h = ~ m1,
   f = ~ m,
-  alpha = ~ A2 / g,
+  alpha = ~ invprop,
   ic_expr = ~ h + alpha * (Y - f)
-)
+))}
 
 #---------------------------------------------
 # Stage 2 RieszCurve:
@@ -59,16 +73,16 @@ rc1 <- RieszCurve$new(
 #---------------------------------------------
 rc2 <- function(delta){return(RieszCurve$new(
   nuis = function(data) {
-    m_fit <- glm(`h[j=1]` ~ L1 + A1,
+    m_fit <- glm(`h[j=1]` ~ momage + momedu + momheight + watmin + hfiacat,
                  family = gaussian(),
                  data = data)
 
     data_shift <- data
-    data_shift$A1 <- data_shift$A1 + delta
+    data_shift$momage <- data_shift$momage + delta
 
     # Fit the probabilistic classifier from Diaz et al. (2021)
     data_aug <- rbind(cbind(data, I = 0), cbind(data_shift, I = 1))
-    r_fit <- glm(I ~ L1 + A1,
+    r_fit <- glm(I ~ momage + momedu + momheight + watmin + hfiacat,
                  family = binomial(),
                  data = data_aug)
 
@@ -87,8 +101,8 @@ rc2 <- function(delta){return(RieszCurve$new(
 #---------------------------------------------
 # Compose the two stages
 #---------------------------------------------
-rc_composed <- function(delta){return(ComposedRieszCurve$new(
-  rc_list = list(rc1, rc2(delta))
+rc_composed <- function(delta, treatment){return(ComposedRieszCurve$new(
+  rc_list = list(rc1(delta, treatment), rc2(delta))
 ))}
 
 #---------------------------------------------
@@ -96,7 +110,7 @@ rc_composed <- function(delta){return(ComposedRieszCurve$new(
 #---------------------------------------------
 est_onestep <- riesz_estimate(
   data = df,
-  rc = rc_composed(3)
+  rc = rc_composed(3, "Control"),
 )
 
 est_onestep
@@ -106,7 +120,7 @@ est_onestep
 #---------------------------------------------
 est_tmle <- riesz_tmle(
   data = df,
-  rc = rc_composed(3),
+  rc = rc_composed(3, "Control"),
   fluctuation = "logistic",
   bounds = c(min(df$Y), max(df$Y)),
   outcome_col = "Y",
@@ -114,3 +128,4 @@ est_tmle <- riesz_tmle(
 )
 
 est_tmle
+```
