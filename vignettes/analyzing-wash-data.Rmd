@@ -110,7 +110,7 @@ rc_composed <- function(delta, treatment){return(ComposedRieszCurve$new(
 #---------------------------------------------
 est_onestep <- riesz_estimate(
   data = df,
-  rc = rc_composed(3, "Control"),
+  rc = rc_composed(0, "WSH"),
 )
 
 est_onestep
@@ -127,5 +127,30 @@ est_tmle <- riesz_tmle(
   use_intercept_and_weights = TRUE
 )
 
-est_tmle
+
+# Run a bunch of them
+get_estimate <- function(treatment){
+  est_tmle <- riesz_tmle(
+    data = df,
+    rc = rc_composed(3, treatment),
+    fluctuation = "logistic",
+    bounds = c(min(df$Y), max(df$Y)),
+    outcome_col = "Y",
+    use_intercept_and_weights = TRUE
+  )
+  data.frame(est = est_tmle$estimate, low = est_tmle$ci_low, high = est_tmle$ci_high, cat = treatment)
+
+}
+
+result <- bind_rows(lapply(unique(wash$tr), get_estimate))
+
+
+p <- ggplot(result) + 
+  geom_vline(aes(xintercept = mean(wash$whz)), color = "darkgray") +
+  geom_errorbar(aes(xmin = low, xmax = high, y = cat, color = cat)) + 
+  geom_point(aes(x = est, y = cat, color = cat)) + 
+  theme_minimal() + 
+  theme(legend.position="none") + ylab("") + xlab("Estimate")
+
+ggsave("wash.png", p, width = 5, height = 5)
 ```
