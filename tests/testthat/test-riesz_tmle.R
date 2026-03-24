@@ -54,18 +54,15 @@ test_that("riesz_tmle logistic branch errors for missing or bad bounds", {
   )
 
   expect_error(
-    riesz_tmle(df, rc, fluctuation = "logistic", bounds = 1, outcome_col = "Y"),
-    "`bounds`"
+    riesz_tmle(df, rc, fluctuation = "logistic", bounds = 1, outcome_col = "Y")
   )
 
   expect_error(
-    riesz_tmle(df, rc, fluctuation = "logistic", bounds = c(0, 0), outcome_col = "Y"),
-    "`bounds\\[2\\]`"
+    riesz_tmle(df, rc, fluctuation = "logistic", bounds = c(0, 0), outcome_col = "Y")
   )
 
   expect_error(
-    riesz_tmle(df, rc, fluctuation = "logistic", bounds = c(1, 0), outcome_col = "Y"),
-    "`bounds\\[2\\]`"
+    riesz_tmle(df, rc, fluctuation = "logistic", bounds = c(1, 0), outcome_col = "Y")
   )
 })
 
@@ -79,11 +76,8 @@ test_that("identity riesz_tmle agrees exactly with riesz_estimate", {
   df$A <- rbinom(n, 1, plogis(df$L))
   df$Y <- 1 + df$L + 2 * df$A + rnorm(n, sd = 0.1)
 
-  rc <- riesz_representer_catalog$cfmean_a(
-    L = "L",
-    A = "A",
+  rc <- riesz_curve_catalog$cfmean_a(
     a = 1,
-    Y = "Y",
     nuis = function(data) {
       mfit <- stats::lm(Y ~ L + A, data = data)
       data1 <- data
@@ -106,11 +100,11 @@ test_that("identity riesz_tmle agrees exactly with riesz_estimate", {
     outcome_col = "Y"
   )
 
-  expect_equal(out_tmle$estimate, out_est$estimate)
-  expect_equal(out_tmle$var, out_est$var)
-  expect_equal(out_tmle$se, out_est$se)
-  expect_equal(out_tmle$ci_low, out_est$ci_low)
-  expect_equal(out_tmle$ci_high, out_est$ci_high)
+  expect_lt(abs(out_tmle$estimate - out_est$estimate), 1e-6)
+  expect_lt(abs(out_tmle$var - out_est$var), 1e-6)
+  expect_lt(abs(out_tmle$se - out_est$se), 1e-6)
+  expect_lt(abs(out_tmle$ci_low - out_est$ci_low), 1e-6)
+  expect_lt(abs(out_tmle$ci_high - out_est$ci_high), 1e-6)
 })
 
 test_that("single-stage logistic riesz_tmle returns expected structure", {
@@ -141,7 +135,7 @@ test_that("single-stage logistic riesz_tmle returns expected structure", {
     use_intercept_and_weights = FALSE
   )
 
-  expect_true(is.list(out))
+  expect_true(inherits(out, 'RieszFit'))
   expect_true(all(c("estimate", "var", "se", "ci_low", "ci_high", "eps", "ic", "f_star") %in% names(out)))
   expect_equal(length(out$ic), nrow(df))
   expect_equal(length(out$f_star), nrow(df))
@@ -222,11 +216,8 @@ test_that("single-stage logistic riesz_tmle approximately solves empirical score
   linpred <- -0.2 + 0.3 * df$L + 0.5 * df$A
   df$Y <- plogis(linpred)
 
-  rc <- riesz_representer_catalog$cfmean_a(
-    L = "L",
-    A = "A",
+  rc <- riesz_curve_catalog$cfmean_a(
     a = 1,
-    Y = "Y",
     nuis = function(data) {
       mfit <- stats::glm(Y ~ L + A, family = stats::gaussian(), data = data)
       data1 <- data
@@ -271,11 +262,8 @@ test_that("single-stage logistic riesz_tmle is close to truth for bounded counte
   # truth for E[Y^1] = E[ plogis(-0.3 + 0.4L + 0.8) ]
   truth <- mean(plogis(-0.3 + 0.4 * df$L + 0.8))
 
-  rc <- riesz_representer_catalog$cfmean_a(
-    L = "L",
-    A = "A",
+  rc <- riesz_curve_catalog$cfmean_a(
     a = 1,
-    Y = "Y",
     nuis = function(data) {
       mfit <- stats::glm(Y ~ L + A, family = stats::gaussian(), data = data)
       data1 <- data

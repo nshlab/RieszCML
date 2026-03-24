@@ -37,11 +37,8 @@ test_that("riesz_estimate matches manual calculations from fit_ic", {
 })
 
 test_that("catalog cfmean_a returns a RieszCurve", {
-  rc <- riesz_representer_catalog$cfmean_a(
-    L = "L",
-    A = "A",
+  rc <- riesz_curve_catalog$cfmean_a(
     a = 1,
-    Y = "Y",
     nuis = function(data) {
       list(
         m = rep(0, nrow(data)),
@@ -61,11 +58,8 @@ test_that("catalog cfmean_a constructs correct alpha", {
     Y = c(3, 4, 5)
   )
 
-  rc <- riesz_representer_catalog$cfmean_a(
-    L = "L",
-    A = "A",
+  rc <- riesz_curve_catalog$cfmean_a(
     a = 1,
-    Y = "Y",
     nuis = function(data) {
       list(
         m = c(0, 0, 0),
@@ -89,11 +83,8 @@ test_that("riesz_estimate for cfmean_a is close to truth in a large sample for a
   df$A <- rbinom(n, size = 1, prob = plogis(df$L))
   df$Y <- 2 + df$L + 3 * df$A + rnorm(n, sd = 0.1)
 
-  rc <- riesz_representer_catalog$cfmean_a(
-    L = "L",
-    A = "A",
+  rc <- riesz_curve_catalog$cfmean_a(
     a = 1,
-    Y = "Y",
     nuis = function(data) {
       mfit <- stats::lm(Y ~ L + A, data = data)
       data1 <- data
@@ -122,11 +113,8 @@ test_that("riesz_estimate for cfmean_a is close to truth in a large sample for a
   df$A <- rbinom(n, size = 1, prob = plogis(df$L))
   df$Y <- 2 + df$L + 3 * df$A + rnorm(n, sd = 0.1)
 
-  rc <- riesz_representer_catalog$cfmean_a(
-    L = "L",
-    A = "A",
+  rc <- riesz_curve_catalog$cfmean_a(
     a = 0,
-    Y = "Y",
     nuis = function(data) {
       mfit <- stats::lm(Y ~ L + A, data = data)
       data0 <- data
@@ -220,7 +208,7 @@ test_that("riesz_estimate works on a simple ComposedRieszCurve", {
   rc_composed <- ComposedRieszCurve$new(rc_list = list(rc1, rc2))
   out <- riesz_estimate(df, rc_composed)
 
-  expect_true(is.list(out))
+  expect_true(inherits(out, 'RieszFit'))
   expect_true(all(c("estimate", "var", "se", "ci_low", "ci_high") %in% names(out)))
   expect_true(is.numeric(out$estimate))
   expect_true(length(out$estimate) == 1)
