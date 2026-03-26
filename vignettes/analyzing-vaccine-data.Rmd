@@ -33,7 +33,7 @@ rc <- function(delta){return(RieszCurve$new(
 
     # regression for Y given current history
     m_fit <- glm(Y ~ IgG_env + age + BMI + bhvrisk,
-                 family = gaussian(),
+                 family = binomial(),
                  data = df)
 
     # treatment mechanism for A2
@@ -56,7 +56,50 @@ rc <- function(delta){return(RieszCurve$new(
   ic_expr = ~ h + alpha * (Y - f)
 ))}
 
-est_onestep <- riesz_estimate(
+est_tmle_complete <- riesz_tmle(
   data = df_complete_treated,
   rc = rc(0.1),
+  fluctuation = "logistic",
+  bounds = c(min(df_complete_treated$Y), max(df_complete_treated$Y)),
+  outcome_col = "Y",
+  use_intercept_and_weights = FALSE
 )
+
+df_updated = df_complete_treated %>% mutate(Y = est_tmle_complete$ic)
+
+rc_cc <- RieszCurve$new(
+  nuis = function(df) {
+    # regression for Y given current history
+    m_fit <- glm(Y ~ casecontrol + HIVwk28preunblfu,
+                 family = gaussian(),
+                 data = df)
+
+
+    # we already have IC weights, so we can just use those as the "propensity score" for the shift
+    # m and m1 are the same since we only operate in the complete data
+
+    list(
+      m = predict(m_fit, newdata = df, type = "response"),
+      m1 = predict(m_fit, newdata = df, type = "response"),
+      invprop = df$wt
+    )
+  },
+  h = ~ m1,
+  f = ~ m,
+  alpha = ~ invprop,
+  ic_expr = ~ h + alpha * (Y - f)
+)
+
+est_tmle <- riesz_tmle(
+  data = df_updated,
+  rc = rc_cc,
+  fluctuation = "logistic",
+  bounds = c(min(df_updated$Y), max(df_updated$Y)),
+  outcome_col = "Y",
+  use_intercept_and_weights = FALSE
+)
+
+print(est_tmle_complete)
+print(est_tmle)
+
+```
