@@ -1,0 +1,62 @@
+---
+title: "Analyzing-WASH-data"
+output: html_document
+---
+
+Load packages and the data
+```{R}
+library(devtools)
+load_all('/home/salbalkus/Research/RieszCML/')
+
+library(nadir)
+library(readr)
+library(tidyverse)
+library(vaccine)
+
+
+```
+
+First, load and clean the vaccine trial data.
+```{R}
+data(hvtn505)
+df <- hvtn505 %>% mutate(Y = HIVwk28preunbl)
+df_complete_treated <- df %>% filter(trt == 1) %>% drop_na()
+
+head(df)
+```
+
+Next, we will Riesz represent the parameter of interest, which is the mean outcome under a shift in the treatment variable.
+
+```{R}
+rc <- function(delta){return(RieszCurve$new(
+  nuis = function(df) {
+
+    # regression for Y given current history
+    m_fit <- glm(Y ~ IgG_env + age + BMI + bhvrisk,
+                 family = gaussian(),
+                 data = df)
+
+    # treatment mechanism for A2
+    df_shift <- df %>% mutate(IgG_env = IgG_env + delta)
+    df_aug <- rbind(cbind(df, I = 0), cbind(df_shift, I = 1))
+    r_fit <- glm(I ~ IgG_env + age + BMI + bhvrisk,
+                 family = binomial(),
+                 data = df_aug)
+
+
+    list(
+      m = predict(m_fit, newdata = df, type = "response"),
+      m1 = predict(m_fit, newdata = df_shift, type = "response"),
+      r = predict(r_fit, newdata = df_shift, type = "response")
+    )
+  },
+  h = ~ m1 - Y,
+  f = ~ m,
+  alpha = ~ r / (1 - r),
+  ic_expr = ~ h + alpha * (Y - f)
+))}
+
+est_onestep <- riesz_estimate(
+  data = df_complete_treated,
+  rc = rc(0.1),
+)
