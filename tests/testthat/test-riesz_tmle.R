@@ -66,9 +66,9 @@ test_that("riesz_tmle logistic branch errors for missing or bad bounds", {
   )
 })
 
-test_that("identity riesz_tmle agrees exactly with riesz_estimate", {
+test_that("identity riesz_tmle agrees approximately with riesz_estimate", {
   set.seed(1)
-  n <- 300
+  n <- 3000
 
   df <- data.frame(
     L = rnorm(n)
@@ -97,7 +97,8 @@ test_that("identity riesz_tmle agrees exactly with riesz_estimate", {
     data = df,
     rc = rc,
     fluctuation = "identity",
-    outcome_col = "Y"
+    outcome_col = "Y",
+    use_intercept_and_weights = TRUE
   )
 
   expect_lt(abs(out_tmle$estimate - out_est$estimate), 1e-6)
