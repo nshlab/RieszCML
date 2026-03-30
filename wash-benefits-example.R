@@ -1,3 +1,6 @@
+
+
+
 library(devtools)
 load_all('/home/salbalkus/Research/RieszCML/')
 
@@ -56,8 +59,7 @@ rc1 <- RieszCurve$new(
 #---------------------------------------------
 rc2 <- function(delta){return(RieszCurve$new(
   nuis = function(data) {
-    #m_fit <- glm(`h[j=1]` ~ L1 + A1,
-    m_fit <- glm(Y ~ L1 + A1,
+    m_fit <- glm(`h[j=1]` ~ L1 + A1,
                  family = gaussian(),
                  data = data)
 
@@ -79,7 +81,7 @@ rc2 <- function(delta){return(RieszCurve$new(
   h = ~ m1,
   f = ~ m,
   alpha = ~ r / (1 - r),
-  ic_expr = ~ h + alpha * (Y - f)#(`h[j=1]` - f)
+  ic_expr = ~ h + alpha * (`h[j=1]` - f)
 ))}
 
 #---------------------------------------------
