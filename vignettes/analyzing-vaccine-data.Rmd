@@ -19,13 +19,13 @@ library(vaccine)
 First, load and clean the vaccine trial data.
 ```{R}
 data(hvtn505)
-df <- hvtn505 %>% mutate(Y = HIVwk28preunbl)
-df_complete_treated <- df %>% filter(trt == 1) %>% drop_na()
+df <- hvtn505 %>% filter(trt == 1)
+df_complete_treated <- df %>% drop_na() %>% mutate(Y = HIVwk28preunbl)
 
 head(df)
 ```
 
-Next, we will Riesz represent the parameter of interest, which is the mean outcome under a shift in the treatment variable.
+Next, we will Riesz represent the parameter of interest, which is the mean outcome under a shift in the treatment variable, under complete data.
 
 ```{R}
 rc <- function(delta){return(RieszCurve$new(
@@ -65,23 +65,33 @@ est_tmle_complete <- riesz_tmle(
   use_intercept_and_weights = FALSE
 )
 
-df_updated = df_complete_treated %>% mutate(Y = est_tmle_complete$ic)
+print(est_tmle_complete)
+
+```
+
+```{r}
+df_updated <- left_join(df, data.frame(pub_id = df_complete_treated$pub_id, Y = est_tmle_complete$h_star), by = "pub_id")
+# Replace NAs so they don't break anything when we multiply by an indicator
+df_updated$Y[is.na(df_updated$Y)] <- 0
+df_updated$wt[is.na(df_updated$wt)] <- 1
+
 
 rc_cc <- RieszCurve$new(
-  nuis = function(df) {
+  nuis = function(df_updated) {
     # regression for Y given current history
-    m_fit <- glm(Y ~ casecontrol + HIVwk28preunblfu,
+    df_complete <- df_updated %>% drop_na()
+    m_fit <- glm(Y ~ HIVwk28preunbl,
                  family = gaussian(),
-                 data = df)
+                 data = df_complete)
 
 
     # we already have IC weights, so we can just use those as the "propensity score" for the shift
     # m and m1 are the same since we only operate in the complete data
 
     list(
-      m = predict(m_fit, newdata = df, type = "response"),
-      m1 = predict(m_fit, newdata = df, type = "response"),
-      invprop = df$wt
+      m = predict(m_fit, newdata = df_updated, type = "response"),
+      m1 = predict(m_fit, newdata = df_updated, type = "response"),
+      invprop = df_updated$casecontrol * df_updated$wt
     )
   },
   h = ~ m1,
@@ -99,7 +109,6 @@ est_tmle <- riesz_tmle(
   use_intercept_and_weights = FALSE
 )
 
-print(est_tmle_complete)
 print(est_tmle)
 
 ```
