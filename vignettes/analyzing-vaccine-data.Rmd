@@ -19,7 +19,12 @@ library(vaccine)
 First, load and clean the vaccine trial data.
 ```{R}
 data(hvtn505)
-df <- hvtn505 %>% filter(trt == 1)
+df <- hvtn505 %>% filter(trt == 1) %>% 
+      mutate(IgG_env = (IgG_env - mean(IgG_env, na.rm = TRUE)) / sd(IgG_env, na.rm = TRUE),
+             IgG_V2 = (IgG_V2 - mean(IgG_V2, na.rm = TRUE)) / sd(IgG_V2, na.rm = TRUE),
+             IgG_V3 = (IgG_V3 - mean(IgG_V3, na.rm = TRUE)) / sd(IgG_V3, na.rm = TRUE),
+            )
+
 df_complete_treated <- df %>% drop_na() %>% mutate(Y = HIVwk28preunbl)
 
 head(df)
@@ -28,16 +33,17 @@ head(df)
 Next, we will Riesz represent the parameter of interest, which is the mean outcome under a shift in the treatment variable, under complete data.
 
 ```{R}
-rc <- function(delta){return(RieszCurve$new(
+rc <- function(delta, treatment){return(RieszCurve$new(
   nuis = function(df) {
 
     # regression for Y given current history
-    m_fit <- glm(Y ~ IgG_env + age + BMI + bhvrisk,
+    m_fit <- glm(Y ~ IgG_env + IgG_V2 + IgG_V3 + age + BMI + bhvrisk,
                  family = binomial(),
                  data = df)
 
     # treatment mechanism for A2
-    df_shift <- df %>% mutate(IgG_env = IgG_env + delta)
+    df_shift <- df
+    df_shift[[treatment]] = df_shift[[treatment]] + delta
     df_aug <- rbind(cbind(df, I = 0), cbind(df_shift, I = 1))
     r_fit <- glm(I ~ IgG_env + age + BMI + bhvrisk,
                  family = binomial(),
@@ -58,7 +64,7 @@ rc <- function(delta){return(RieszCurve$new(
 
 est_tmle_complete <- riesz_tmle(
   data = df_complete_treated,
-  rc = rc(0.1),
+  rc = rc(1, "IgG_env"),
   fluctuation = "logistic",
   bounds = c(min(df_complete_treated$Y), max(df_complete_treated$Y)),
   outcome_col = "Y",
@@ -69,46 +75,61 @@ print(est_tmle_complete)
 
 ```
 
+Then, we will use the complete data EIF estimate to perform a TMLE for the two-phase sampling data.
 ```{r}
-df_updated <- left_join(df, data.frame(pub_id = df_complete_treated$pub_id, Y = est_tmle_complete$h_star), by = "pub_id")
-# Replace NAs so they don't break anything when we multiply by an indicator
-df_updated$Y[is.na(df_updated$Y)] <- 0
-df_updated$wt[is.na(df_updated$wt)] <- 1
 
+two_phase_tmle <- function(df, df_complete_treated, delta, treatment){
 
-rc_cc <- RieszCurve$new(
-  nuis = function(df_updated) {
-    # regression for Y given current history
-    df_complete <- df_updated %>% drop_na()
-    m_fit <- glm(Y ~ HIVwk28preunbl,
-                 family = gaussian(),
-                 data = df_complete)
+  # First, estimate the TMLE in the complete data
+  est_tmle_complete <- riesz_tmle(
+    data = df_complete_treated,
+    rc = rc(delta, treatment),
+    fluctuation = "logistic",
+    bounds = c(min(df_complete_treated$Y), max(df_complete_treated$Y)),
+    outcome_col = "Y",
+    use_intercept_and_weights = FALSE
+  )
 
+  # Add the estimated EIF from the previous step to the data
+  df_updated <- left_join(df, data.frame(pub_id = df_complete_treated$pub_id, Y = est_tmle_complete$h_star), by = "pub_id")
+  # Replace NAs so they don't break anything when we multiply by an indicator
+  df_updated$Y[is.na(df_updated$Y)] <- 0
+  df_updated$wt[is.na(df_updated$wt)] <- 1
 
-    # we already have IC weights, so we can just use those as the "propensity score" for the shift
-    # m and m1 are the same since we only operate in the complete data
+  # Implement Riesz representation for the two-phase sampling data, using the EIF from the complete 
+  # data as the "outcome" in the second stage TMLE
+  rc_cc <- RieszCurve$new(
+    nuis = function(df_updated) {
+      # regression for Y given current history
+      df_complete <- df_updated %>% drop_na()
+      m_fit <- glm(Y ~ HIVwk28preunbl,
+                  family = gaussian(),
+                  data = df_complete)
+      # we already have IC weights, so we can just use those as the "propensity score" for the shift
+      # m and m1 are the same since we only operate in the complete data
+      list(
+        m = predict(m_fit, newdata = df_updated, type = "response"),
+        m1 = predict(m_fit, newdata = df_updated, type = "response"),
+        invprop = df_updated$casecontrol * df_updated$wt
+      )
+    },
+    h = ~ m1,
+    f = ~ m,
+    alpha = ~ invprop,
+    ic_expr = ~ h + alpha * (Y - f)
+  )
 
-    list(
-      m = predict(m_fit, newdata = df_updated, type = "response"),
-      m1 = predict(m_fit, newdata = df_updated, type = "response"),
-      invprop = df_updated$casecontrol * df_updated$wt
-    )
-  },
-  h = ~ m1,
-  f = ~ m,
-  alpha = ~ invprop,
-  ic_expr = ~ h + alpha * (Y - f)
-)
+  est_tmle <- riesz_tmle(
+    data = df_updated,
+    rc = rc_cc,
+    fluctuation = "logistic",
+    bounds = c(min(df_updated$Y), max(df_updated$Y)),
+    outcome_col = "Y",
+    use_intercept_and_weights = FALSE
+  )
 
-est_tmle <- riesz_tmle(
-  data = df_updated,
-  rc = rc_cc,
-  fluctuation = "logistic",
-  bounds = c(min(df_updated$Y), max(df_updated$Y)),
-  outcome_col = "Y",
-  use_intercept_and_weights = FALSE
-)
+  return(est_tmle)
+}
 
-print(est_tmle)
-
+two_phase_tmle(df, df_complete_treated, 0, "IgG_V2")
 ```
