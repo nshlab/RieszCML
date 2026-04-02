@@ -165,22 +165,24 @@ two_phase_tmle(df, df_ct, 0, "cd8_score_scaled")
 We can now run this estimator over various shifts in the data
 
 ```{r}
-data(iris)
-foo = super_learner(
-  data,
-  learners,
-  formulas,
-  y_variable = NULL,
-  n_folds = 5,
-  determine_super_learner_weights,
-  ensemble_or_discrete = "ensemble",
-  cv_schema,
-  outcome_type = "continuous",
-  extra_learner_args = NULL,
-  verbose_output = FALSE,
-  cluster_ids,
-  strata_ids,
-  weights = NULL
+shifts <- c(-2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2)
+cd4_results <- lapply(shifts, \(x) two_phase_tmle(df, df_ct, x, "cd4_score_scaled"))
+cd4_ests <- sapply(cd4_results, \(x) c(est = x$estimate, lo = x$ci_low, hi = x$ci_high))
+
+cd4_df <- data.frame(
+  shift = shifts,
+  est = cd4_ests[1, ],
+  lo = cd4_ests[2, ],
+  hi = cd4_ests[3, ]
 )
 
+ggplot(cd4_df, aes(x = shift, y = est)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = lo, ymax = hi), width = 0.1) +
+  labs(
+    title = "CD4 Estimates by Shift",
+    x = "Shift",
+    y = "Estimate"
+  ) +
+  theme_minimal()
 ```
