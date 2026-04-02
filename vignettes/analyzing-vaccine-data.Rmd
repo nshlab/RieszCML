@@ -11,106 +11,116 @@ load_all('/home/salbalkus/Research/RieszCML/')
 library(nadir)
 library(readr)
 library(tidyverse)
-library(vaccine)
+# library(vaccine)
 
 
 ```
 
 First, load and clean the vaccine trial data.
 ```{R}
-data(hvtn505)
-df <- hvtn505 %>% filter(trt == 1) %>% 
-      mutate(IgG_env = (IgG_env - mean(IgG_env, na.rm = TRUE)) / sd(IgG_env, na.rm = TRUE),
-             IgG_V2 = (IgG_V2 - mean(IgG_V2, na.rm = TRUE)) / sd(IgG_V2, na.rm = TRUE),
-             IgG_V3 = (IgG_V3 - mean(IgG_V3, na.rm = TRUE)) / sd(IgG_V3, na.rm = TRUE),
-            )
 
-df_complete_treated <- df %>% drop_na() %>% mutate(Y = HIVwk28preunbl)
+large_data <- read_csv("https://raw.githubusercontent.com/nhejazi/pub_txshift_biometrics/refs/heads/master/application/data/primary505_for_sharing.csv") %>%
+  select(pub_id, HIVwk28preunbl, trt, age, racecc, BMI, bhvrisk)
 
-head(df)
+subsample_data<- read_csv("https://raw.githubusercontent.com/nhejazi/pub_txshift_biometrics/refs/heads/master/application/data/janes_ipc_weights.csv") %>%
+  select(pub_id,                              # for censoring indicator
+         cd4_score_scaled, cd8_score_scaled,  # immune markers from Janes et al
+         wt, wt_hal,                          # IPC weights (true and estimated)
+        )
+
+df <- left_join(large_data, subsample_data, by = "pub_id") %>% filter(trt == 1)
+df$sampled <- is.na(df$cd4_score_scaled) == 0
+df$wt[df$sampled == 0] <- 0
+df$wt_hal[df$sampled == 0] <- 0
+df$Y <- df$HIVwk28preunbl
+
+df_ct <- df %>% drop_na()
+
 ```
 
 Next, we will Riesz represent the parameter of interest, which is the mean outcome under a shift in the treatment variable, under complete data.
 
 ```{R}
-rc <- function(delta, treatment){return(RieszCurve$new(
+rc <- function(delta, name){return(RieszCurve$new(
   nuis = function(df) {
 
+    df_ct <- df %>% drop_na()
+
     # regression for Y given current history
-    m_fit <- glm(Y ~ IgG_env + IgG_V2 + IgG_V3 + age + BMI + bhvrisk,
+    m_fit <- glm(Y ~ get(name) + age + racecc + BMI + bhvrisk,
                  family = binomial(),
-                 data = df)
+                 data = df_ct)
 
     # treatment mechanism for A2
-    df_shift <- df
-    df_shift[[treatment]] = df_shift[[treatment]] + delta
-    df_aug <- rbind(cbind(df, I = 0), cbind(df_shift, I = 1))
-    r_fit <- glm(I ~ IgG_env + age + BMI + bhvrisk,
+    df_shift <- df_ct
+    df_shift[[name]] = df_shift[[name]] - delta
+    df_aug <- rbind(cbind(df_ct, I = 0), cbind(df_shift, I = 1))
+    r_fit <- glm(I ~ get(name) + age + racecc + BMI + bhvrisk,
                  family = binomial(),
                  data = df_aug)
 
 
     list(
-      m = predict(m_fit, newdata = df, type = "response"),
+      m = predict(m_fit, newdata = df_ct, type = "response"),
       m1 = predict(m_fit, newdata = df_shift, type = "response"),
       r = predict(r_fit, newdata = df_shift, type = "response")
     )
   },
-  h = ~ m1 - Y,
+  h = ~ m1,
   f = ~ m,
   alpha = ~ r / (1 - r),
   ic_expr = ~ h + alpha * (Y - f)
 ))}
 
 est_tmle_complete <- riesz_tmle(
-  data = df_complete_treated,
-  rc = rc(1, "IgG_env"),
+  data = df_ct,
+  rc = rc(0, "cd4_score_scaled"),
   fluctuation = "logistic",
-  bounds = c(min(df_complete_treated$Y), max(df_complete_treated$Y)),
+  bounds = c(min(df_ct$Y), max(df_ct$Y)),
   outcome_col = "Y",
-  use_intercept_and_weights = FALSE
+  use_intercept_and_weights = F
 )
-
-print(est_tmle_complete)
 
 ```
 
 Then, we will use the complete data EIF estimate to perform a TMLE for the two-phase sampling data.
 ```{r}
 
-two_phase_tmle <- function(df, df_complete_treated, delta, treatment){
+two_phase_tmle <- function(df, df_ct, delta, name){
 
   # First, estimate the TMLE in the complete data
   est_tmle_complete <- riesz_tmle(
-    data = df_complete_treated,
-    rc = rc(delta, treatment),
+    data = df_ct,
+    rc = rc(delta, name),
     fluctuation = "logistic",
-    bounds = c(min(df_complete_treated$Y), max(df_complete_treated$Y)),
+    bounds = c(min(df_ct$Y), max(df_ct$Y)),
     outcome_col = "Y",
-    use_intercept_and_weights = FALSE
+    use_intercept_and_weights = F
   )
 
   # Add the estimated EIF from the previous step to the data
-  df_updated <- left_join(df, data.frame(pub_id = df_complete_treated$pub_id, Y = est_tmle_complete$h_star), by = "pub_id")
+  df_updated <- left_join(df %>% select(-Y), data.frame(pub_id = df_ct$pub_id, Y = est_tmle_complete$h_star), by = "pub_id")
   # Replace NAs so they don't break anything when we multiply by an indicator
+  df_updated["casecontrol"] <- ifelse(is.na(df_updated[name]), 0, 1)
   df_updated$Y[is.na(df_updated$Y)] <- 0
-  df_updated$wt[is.na(df_updated$wt)] <- 1
+  df_updated$wt[is.na(df_updated$wt)] <- 0
 
   # Implement Riesz representation for the two-phase sampling data, using the EIF from the complete 
   # data as the "outcome" in the second stage TMLE
   rc_cc <- RieszCurve$new(
     nuis = function(df_updated) {
       # regression for Y given current history
-      df_complete <- df_updated %>% drop_na()
-      m_fit <- glm(Y ~ HIVwk28preunbl,
+      m_fit <- glm(Y ~ HIVwk28preunbl + casecontrol,
                   family = gaussian(),
-                  data = df_complete)
+                  data = df_updated)
       # we already have IC weights, so we can just use those as the "propensity score" for the shift
       # m and m1 are the same since we only operate in the complete data
+      df_updated_shift = df_updated
+      df_updated_shift["casecontrol"] <- 1
       list(
         m = predict(m_fit, newdata = df_updated, type = "response"),
         m1 = predict(m_fit, newdata = df_updated, type = "response"),
-        invprop = df_updated$casecontrol * df_updated$wt
+        invprop = df_updated$wt
       )
     },
     h = ~ m1,
@@ -125,11 +135,12 @@ two_phase_tmle <- function(df, df_complete_treated, delta, treatment){
     fluctuation = "logistic",
     bounds = c(min(df_updated$Y), max(df_updated$Y)),
     outcome_col = "Y",
-    use_intercept_and_weights = FALSE
+    use_intercept_and_weights = F
   )
 
   return(est_tmle)
 }
 
-two_phase_tmle(df, df_complete_treated, 0, "IgG_V2")
+two_phase_tmle(df, df_ct, 0, "cd4_score_scaled")
 ```
+
