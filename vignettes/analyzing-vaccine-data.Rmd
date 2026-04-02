@@ -47,23 +47,41 @@ rc <- function(delta, name){return(RieszCurve$new(
     df_ct <- df %>% drop_na()
 
     # regression for Y given current history
-    m_fit <- glm(Y ~ get(name) + age + racecc + BMI + bhvrisk,
-                 family = binomial(),
-                 data = df_ct)
+    form_m <- Y ~ get(name) + age + racecc + BMI + bhvrisk
+    #m_fit <- glm(form_m,
+    #             family = binomial(),
+    #             data = df_ct)
+    m_fit <- super_learner(
+      data = df_ct,
+      formulas = form_m,
+      outcome_type = "binary",
+      n_folds = 10,
+      learners = list(lnr_mean, lnr_glm, lnr_earth, lnr_glmnet, lnr_xgboost)
+    )
 
     # treatment mechanism for A2
-    df_shift <- df_ct
-    df_shift[[name]] = df_shift[[name]] - delta
-    df_aug <- rbind(cbind(df_ct, I = 0), cbind(df_shift, I = 1))
-    r_fit <- glm(I ~ get(name) + age + racecc + BMI + bhvrisk,
-                 family = binomial(),
-                 data = df_aug)
+    df_inv_shift <- df_shift <- df_ct
+    df_shift[[name]] = df_shift[[name]] + delta
+    df_inv_shift[[name]] = df_shift[[name]] - delta
+    df_aug <- rbind(cbind(df_ct, I = 0), cbind(df_inv_shift, I = 1))
+    
+    form_r = I ~ get(name) + age + racecc + BMI + bhvrisk
+    #r_fit <- glm(form_r,
+    #             family = binomial(),
+    #             data = df_aug)
+    r_fit <- super_learner(
+      data = df_aug,
+      formulas = form_r,
+      outcome_type = "binary",
+      n_folds = 10,
+      learners = list(lnr_mean, lnr_glm, lnr_earth, lnr_glmnet, lnr_xgboost)
+    )
 
 
     list(
       m = predict(m_fit, newdata = df_ct, type = "response"),
       m1 = predict(m_fit, newdata = df_shift, type = "response"),
-      r = predict(r_fit, newdata = df_shift, type = "response")
+      r = predict(r_fit, newdata = df_inv_shift, type = "response")
     )
   },
   h = ~ m1,
@@ -74,7 +92,7 @@ rc <- function(delta, name){return(RieszCurve$new(
 
 est_tmle_complete <- riesz_tmle(
   data = df_ct,
-  rc = rc(0, "cd4_score_scaled"),
+  rc = rc(1, "cd4_score_scaled"),
   fluctuation = "logistic",
   bounds = c(min(df_ct$Y), max(df_ct$Y)),
   outcome_col = "Y",
@@ -141,6 +159,28 @@ two_phase_tmle <- function(df, df_ct, delta, name){
   return(est_tmle)
 }
 
-two_phase_tmle(df, df_ct, 0, "cd4_score_scaled")
+two_phase_tmle(df, df_ct, 0, "cd8_score_scaled")
 ```
 
+We can now run this estimator over various shifts in the data
+
+```{r}
+data(iris)
+foo = super_learner(
+  data,
+  learners,
+  formulas,
+  y_variable = NULL,
+  n_folds = 5,
+  determine_super_learner_weights,
+  ensemble_or_discrete = "ensemble",
+  cv_schema,
+  outcome_type = "continuous",
+  extra_learner_args = NULL,
+  verbose_output = FALSE,
+  cluster_ids,
+  strata_ids,
+  weights = NULL
+)
+
+```
