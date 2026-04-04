@@ -4,7 +4,6 @@ riesz_tmle <- function(data,
                        fluctuation = "logistic",
                        bounds = NULL,
                        outcome_col,
-                       use_intercept_and_weights = TRUE,
                        clip = 1e-6,
                        significance_alpha = 0.05) {
 
@@ -25,7 +24,6 @@ riesz_tmle <- function(data,
       fluctuation = fluctuation,
       bounds = bounds,
       outcome_col = outcome_col,
-      use_intercept_and_weights = use_intercept_and_weights,
       clip = clip,
       significance_alpha = significance_alpha
     ))
@@ -38,7 +36,6 @@ riesz_tmle <- function(data,
       fluctuation = fluctuation,
       bounds = bounds,
       outcome_col = outcome_col,
-      use_intercept_and_weights = use_intercept_and_weights,
       clip = clip,
       significance_alpha = significance_alpha
     ))
@@ -103,8 +100,7 @@ riesz_tmle <- function(data,
                                   clever_covariate,
                                   fluctuation,
                                   bounds = NULL,
-                                  clip = 1e-6,
-                                  use_intercept_and_weights = TRUE) {
+                                  clip = 1e-6) {
 
   n <- length(target)
 
@@ -121,28 +117,16 @@ riesz_tmle <- function(data,
       offset = offset
     )
 
-    if (use_intercept_and_weights) {
-      fit <- stats::glm(
-        target ~ 1,
-        family = stats::gaussian(),
-        data = dat,
-        weights = dat$H,
-        offset = offset
-      )
-      coefs <- stats::coef(fit)
-      intercept <- 0
-      eps <- unname(coefs["(Intercept)"])
-    } else {
-      fit <- stats::glm(
-        target ~ -1 + H,
-        family = stats::gaussian(),
-        data = dat,
-        offset = offset
-      )
-      coefs <- stats::coef(fit)
-      intercept <- 0
-      eps <- unname(coefs["H"])
-    }
+
+    fit <- stats::glm(
+      target ~ -1 + H,
+      family = stats::gaussian(),
+      data = dat,
+      offset = offset
+    )
+    coefs <- stats::coef(fit)
+    intercept <- 0
+    eps <- unname(coefs["H"])
 
     updated <- offset + intercept + eps * clever_covariate
 
@@ -165,30 +149,16 @@ riesz_tmle <- function(data,
       offset_logit = offset_logit
     )
 
-    if (use_intercept_and_weights) {
-      fit <- suppressWarnings(stats::glm(
-        target01 ~ 1 + H,
-        family = stats::binomial(),
-        data = dat,
-        offset = offset_logit
-      ))
-      coefs <- stats::coef(fit)
-      intercept <- 0
-      eps <- unname(coefs["(Intercept)"])
-      if (is.na(intercept)) intercept <- 0
-    } else {
-      fit <- suppressWarnings(stats::glm(
+    fit <- suppressWarnings(stats::glm(
         target01 ~ -1 + H,
         family = stats::binomial(),
         data = dat,
         offset = offset_logit
       ))
-      coefs <- stats::coef(fit)
-      intercept <- 0
-      eps <- unname(coefs["H"])
-    }
+    coefs <- stats::coef(fit)
+    eps <- unname(coefs["H"])
 
-    updated01 <- expit(offset_logit + intercept + eps * clever_covariate)
+    updated01 <- expit(offset_logit + eps * clever_covariate)
     updated01 <- clip01(updated01, clip = clip)
     updated <- from01(updated01, bounds)
 
@@ -260,7 +230,6 @@ riesz_tmle <- function(data,
                                fluctuation,
                                bounds,
                                outcome_col,
-                               use_intercept_and_weights,
                                clip,
                                significance_alpha) {
 
@@ -295,8 +264,7 @@ riesz_tmle <- function(data,
     clever_covariate = alpha,
     fluctuation = fluctuation,
     bounds = bounds,
-    clip = clip,
-    use_intercept_and_weights = use_intercept_and_weights
+    clip = clip
   )
 
   f_star <- fluc$updated
@@ -342,7 +310,6 @@ riesz_tmle <- function(data,
                                  fluctuation,
                                  bounds,
                                  outcome_col,
-                                 use_intercept_and_weights,
                                  clip,
                                  significance_alpha) {
 
@@ -387,8 +354,7 @@ riesz_tmle <- function(data,
       clever_covariate = omega_list[[j]],
       fluctuation = fluctuation,
       bounds = bounds,
-      clip = clip,
-      use_intercept_and_weights = use_intercept_and_weights
+      clip = clip
     )
 
     f_star_list[[j]] <- fluc$updated

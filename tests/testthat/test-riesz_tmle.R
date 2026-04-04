@@ -97,8 +97,7 @@ test_that("identity riesz_tmle agrees approximately with riesz_estimate", {
     data = df,
     rc = rc,
     fluctuation = "identity",
-    outcome_col = "Y",
-    use_intercept_and_weights = TRUE
+    outcome_col = "Y"
   )
 
   expect_lt(abs(out_tmle$estimate - out_est$estimate), 1e-6)
@@ -132,8 +131,7 @@ test_that("single-stage logistic riesz_tmle returns expected structure", {
     rc = rc,
     fluctuation = "logistic",
     bounds = c(0, 1),
-    outcome_col = "Y",
-    use_intercept_and_weights = FALSE
+    outcome_col = "Y"
   )
 
   expect_true(inherits(out, 'RieszFit'))
@@ -167,8 +165,7 @@ test_that("single-stage logistic riesz_tmle keeps f_star within bounds", {
     rc = rc,
     fluctuation = "logistic",
     bounds = c(-1, 1),
-    outcome_col = "Y",
-    use_intercept_and_weights = FALSE
+    outcome_col = "Y"
   )
 
   expect_true(all(out$f_star >= -1))
@@ -198,8 +195,7 @@ test_that("single-stage logistic riesz_tmle has near-zero epsilon when Y equals 
     rc = rc,
     fluctuation = "logistic",
     bounds = c(0, 1),
-    outcome_col = "Y",
-    use_intercept_and_weights = FALSE
+    outcome_col = "Y"
   )
 
   expect_equal(out$eps, 0, tolerance = 1e-6)
@@ -240,8 +236,7 @@ test_that("single-stage logistic riesz_tmle approximately solves empirical score
     rc = rc,
     fluctuation = "logistic",
     bounds = c(0, 1),
-    outcome_col = "Y",
-    use_intercept_and_weights = FALSE
+    outcome_col = "Y"
   )
 
   score_mean <- mean(rc$fit_alpha * (df$Y - out$f_star))
@@ -284,41 +279,8 @@ test_that("single-stage logistic riesz_tmle is close to truth for bounded counte
     rc = rc,
     fluctuation = "logistic",
     bounds = c(0, 1),
-    outcome_col = "Y",
-    use_intercept_and_weights = FALSE
+    outcome_col = "Y"
   )
 
   expect_equal(out$estimate, truth, tolerance = 0.05)
-})
-
-test_that("single-stage logistic riesz_tmle with intercept branch returns finite epsilon after fix", {
-  df <- data.frame(
-    Y = c(0.15, 0.25, 0.5, 0.8),
-    A = c(1, 0, 1, 1),
-    L = c(-1, 0, 1, 2)
-  )
-
-  rc <- RieszCurve$new(
-    nuis = list(
-      m = c(0.2, 0.3, 0.45, 0.7),
-      ma = c(0.55, 0.55, 0.55, 0.55),
-      g = c(0.7, 0.4, 0.8, 0.9)
-    ),
-    alpha = ~ I(A == 1) / g,
-    f = ~ m,
-    h = ~ ma,
-    ic_expr = ~ h + alpha * (Y - f)
-  )
-
-  out <- riesz_tmle(
-    data = df,
-    rc = rc,
-    fluctuation = "logistic",
-    bounds = c(0, 1),
-    outcome_col = "Y",
-    use_intercept_and_weights = TRUE
-  )
-
-  expect_true(is.finite(out$eps))
-  expect_true(all(is.finite(out$f_star)))
 })

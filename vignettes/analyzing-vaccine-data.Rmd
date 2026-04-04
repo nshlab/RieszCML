@@ -95,8 +95,7 @@ est_tmle_complete <- riesz_tmle(
   rc = rc(1, "cd4_score_scaled"),
   fluctuation = "logistic",
   bounds = c(min(df_ct$Y), max(df_ct$Y)),
-  outcome_col = "Y",
-  use_intercept_and_weights = F
+  outcome_col = "Y"
 )
 
 ```
@@ -112,8 +111,7 @@ two_phase_tmle <- function(df, df_ct, delta, name){
     rc = rc(delta, name),
     fluctuation = "logistic",
     bounds = c(min(df_ct$Y), max(df_ct$Y)),
-    outcome_col = "Y",
-    use_intercept_and_weights = F
+    outcome_col = "Y"
   )
 
   # Add the estimated EIF from the previous step to the data
@@ -152,8 +150,7 @@ two_phase_tmle <- function(df, df_ct, delta, name){
     rc = rc_cc,
     fluctuation = "logistic",
     bounds = c(min(df_updated$Y), max(df_updated$Y)),
-    outcome_col = "Y",
-    use_intercept_and_weights = F
+    outcome_col = "Y"
   )
 
   return(est_tmle)

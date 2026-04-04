@@ -209,7 +209,6 @@ fit_ate_cf <- riesz_tmle(
   rc = rc_ate_cf,
   fluctuation = "logistic",
   bounds = c(0, 1),
-  use_intercept_and_weights = FALSE,
   outcome_col = "Y"
 )
 

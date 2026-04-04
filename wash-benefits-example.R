@@ -16,7 +16,7 @@ wash <- read_csv(
 )
 normalize <- function(v){(v - min(v)) / (max(v) - min(v))}
 
-df = data.frame(Y = wash$whz, 
+df = data.frame(Y = wash$whz,
                 A1 = wash$momage,
                 L1 = wash$Nlt18,
                 A2 = ifelse(wash$tr == "Control", 1, 0),
@@ -109,8 +109,7 @@ est_tmle <- riesz_tmle(
   rc = rc_composed(3),
   fluctuation = "logistic",
   bounds = c(min(df$Y), max(df$Y)),
-  outcome_col = "Y",
-  use_intercept_and_weights = TRUE
+  outcome_col = "Y"
 )
 
 est_tmle
