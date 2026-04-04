@@ -6,9 +6,9 @@ output: html_document
 ```{r}
 library(RieszCML)
 
-set.seed(2026)
+set.seed(1234)
 
-n <- 400
+n <- 30
 
 # Strong confounding + near positivity problems
 L <- rnorm(n)
