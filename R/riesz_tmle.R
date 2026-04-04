@@ -267,6 +267,24 @@ riesz_tmle <- function(data,
   y <- data[[outcome_col]]
   rc$fit(data)
 
+  f <- rc$fit_f
+  h <- rc$fit_h
+  alpha <- rc$fit_alpha
+
+
+  # untargeted procedure for EIF --------------------------------------------------------------
+
+  # Untargeted plug-in
+  psi_init <- mean(h)
+
+  # Untargeted IC-like quantity
+  ic_init <- rc$fit_ic
+
+  # Centered EIF for variance
+  eif_init <- ic_init - psi_init
+
+  # targeted procedure for estimate -----------------------------------------
+
   alpha <- rc$fit_alpha
   h <- rc$fit_h
   f <- rc$fit_f
@@ -294,11 +312,10 @@ riesz_tmle <- function(data,
   )
 
   tmle_estimate <- mean(h_star)
-  ic_for_inference <- h_star + alpha * (y - f)
 
   summarized_tmle_fit <- .summarize_tmle_fit(
     estimate = tmle_estimate,
-    ic_for_inference = ic_for_inference,
+    ic_for_inference = eif_init,
     significance_alpha = significance_alpha
   )
 
@@ -311,7 +328,7 @@ riesz_tmle <- function(data,
     significance_alpha = significance_alpha,
     estimator = "TMLE",
     n = summarized_tmle_fit$n,
-    ic = ic_for_inference,
+    ic = eif_init,
     eps = fluc$eps,
     intercept = fluc$intercept,
     f_star = f_star,
@@ -394,12 +411,14 @@ riesz_tmle <- function(data,
 
   tmle_estimate <- mean(h_star_list[[J]])
 
-  ic_for_inference <- rep(0, n)
-  for (j in seq_len(J)) {
-    ic_for_inference <- ic_for_inference +
-      omega_list[[j]] * (target_list[[j]] - f_list[[j]])
-  }
-  ic_for_inference <- ic_for_inference + h_star_list[[J]]
+  untargeted_ic <- .compute_untargeted_ic_composed(
+    y = y,
+    omega_list = omega_list,
+    f_list = f_list,
+    h_list = h_list
+  )
+  ic_for_inference <- untargeted_ic$ic
+  plugin_estimate <- untargeted_ic$psi
 
   summarized_tmle_fit <- .summarize_tmle_fit(
     estimate = tmle_estimate,
@@ -426,4 +445,31 @@ riesz_tmle <- function(data,
     targets = target_list
   )
 }
+
+
+.compute_untargeted_ic_composed <- function(y, omega_list, f_list, h_list) {
+  n <- length(y)
+  J <- length(f_list)
+
+  current_target_init <- y
+  target_list_init <- vector("list", J)
+
+  for (j in seq_len(J)) {
+    target_list_init[[j]] <- current_target_init
+    current_target_init <- h_list[[j]]
+  }
+
+  ic_init <- rep(0, n)
+  for (j in seq_len(J)) {
+    ic_init <- ic_init + omega_list[[j]] * (target_list_init[[j]] - f_list[[j]])
+  }
+  ic_init <- ic_init + h_list[[J]]
+
+  list(
+    ic = ic_init,
+    psi = mean(h_list[[J]]),
+    targets = target_list_init
+  )
+}
+
 
