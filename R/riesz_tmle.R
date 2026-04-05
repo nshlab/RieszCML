@@ -4,6 +4,7 @@ riesz_tmle <- function(data,
                        fluctuation = "logistic",
                        bounds = NULL,
                        outcome_col,
+                       fluctuation_weights = NULL,
                        clip = 1e-6,
                        significance_alpha = 0.05) {
 
@@ -13,6 +14,7 @@ riesz_tmle <- function(data,
     fluctuation = fluctuation,
     bounds = bounds,
     outcome_col = outcome_col,
+    fluctuation_weights = fluctuation_weights,
     clip = clip,
     significance_alpha = significance_alpha
   )
@@ -24,6 +26,7 @@ riesz_tmle <- function(data,
       fluctuation = fluctuation,
       bounds = bounds,
       outcome_col = outcome_col,
+      fluctuation_weights = fluctuation_weights,
       clip = clip,
       significance_alpha = significance_alpha
     ))
@@ -36,6 +39,7 @@ riesz_tmle <- function(data,
       fluctuation = fluctuation,
       bounds = bounds,
       outcome_col = outcome_col,
+      fluctuation_weights = fluctuation_weights,
       clip = clip,
       significance_alpha = significance_alpha
     ))
@@ -50,6 +54,7 @@ riesz_tmle <- function(data,
                                         fluctuation,
                                         bounds,
                                         outcome_col,
+                                        fluctuation_weights,
                                         clip,
                                         significance_alpha) {
 
@@ -91,6 +96,20 @@ riesz_tmle <- function(data,
       stop("`bounds` must satisfy bounds[1] < bounds[2], both finite.")
     }
   }
+  if (!is.null(fluctuation_weights)) {
+    if (!is.numeric(fluctuation_weights)) {
+      stop("`fluctuation_weights` must be NULL or numeric.")
+    }
+    if (length(fluctuation_weights) != nrow(data)) {
+      stop("`fluctuation_weights` must have length nrow(data).")
+    }
+    if (anyNA(fluctuation_weights)) {
+      stop("`fluctuation_weights` cannot contain NA values.")
+    }
+    if (any(fluctuation_weights < 0)) {
+      stop("`fluctuation_weights` must be nonnegative.")
+    }
+  }
 
   invisible(NULL)
 }
@@ -99,6 +118,7 @@ riesz_tmle <- function(data,
                                   offset,
                                   clever_covariate,
                                   fluctuation,
+                                  fluctuation_weights = NULL,
                                   bounds = NULL,
                                   clip = 1e-6) {
 
@@ -109,6 +129,17 @@ riesz_tmle <- function(data,
   if (!is.numeric(clever_covariate) || length(clever_covariate) != n) {
     stop("`clever_covariate` must be numeric.")
   }
+  if (!is.null(fluctuation_weights)) {
+    if (!is.numeric(fluctuation_weights) || length(fluctuation_weights) != n) {
+      stop("`fluctuation_weights` must be NULL or a numeric vector of length `target`.")
+    }
+    if (anyNA(fluctuation_weights)) {
+      stop("`fluctuation_weights` cannot contain NA values.")
+    }
+    if (any(fluctuation_weights < 0)) {
+      stop("`fluctuation_weights` must be nonnegative.")
+    }
+  }
 
   if (fluctuation == "identity") {
     dat <- data.frame(
@@ -117,12 +148,12 @@ riesz_tmle <- function(data,
       offset = offset
     )
 
-
     fit <- stats::glm(
       target ~ -1 + H,
       family = stats::gaussian(),
       data = dat,
-      offset = offset
+      offset = offset,
+      weights = fluctuation_weights
     )
     coefs <- stats::coef(fit)
     intercept <- 0
@@ -150,15 +181,18 @@ riesz_tmle <- function(data,
     )
 
     fit <- suppressWarnings(stats::glm(
-        target01 ~ -1 + H,
-        family = stats::binomial(),
-        data = dat,
-        offset = offset_logit
-      ))
+      target01 ~ -1 + H,
+      family = stats::binomial(),
+      data = dat,
+      offset = offset_logit,
+      weights = fluctuation_weights
+    ))
+
     coefs <- stats::coef(fit)
     eps <- unname(coefs["H"])
+    intercept <- 0
 
-    updated01 <- expit(offset_logit + eps * clever_covariate)
+    updated01 <- expit(offset_logit + intercept + eps * clever_covariate)
     updated01 <- clip01(updated01, clip = clip)
     updated <- from01(updated01, bounds)
 
@@ -230,6 +264,7 @@ riesz_tmle <- function(data,
                                fluctuation,
                                bounds,
                                outcome_col,
+                               fluctuation_weights,
                                clip,
                                significance_alpha) {
 
@@ -263,6 +298,7 @@ riesz_tmle <- function(data,
     offset = f,
     clever_covariate = alpha,
     fluctuation = fluctuation,
+    fluctuation_weights = fluctuation_weights,
     bounds = bounds,
     clip = clip
   )
@@ -310,6 +346,7 @@ riesz_tmle <- function(data,
                                  fluctuation,
                                  bounds,
                                  outcome_col,
+                                 fluctuation_weights,
                                  clip,
                                  significance_alpha) {
 
@@ -353,6 +390,7 @@ riesz_tmle <- function(data,
       offset = f_list[[j]],
       clever_covariate = omega_list[[j]],
       fluctuation = fluctuation,
+      fluctuation_weights = fluctuation_weights,
       bounds = bounds,
       clip = clip
     )
@@ -368,6 +406,7 @@ riesz_tmle <- function(data,
       eps = fluc$eps,
       intercept = fluc$intercept,
       fluctuation = fluctuation,
+      fluctuation_weights = fluctuation_weights,
       bounds = bounds,
       clip = clip
     )
