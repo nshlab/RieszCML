@@ -57,7 +57,11 @@ riesz_curve_catalog$cfmean_a <- function(
     alpha = alpha_formula,
     f = ~ m,
     h = ~ ma,
-    ic_expr = ~ h + alpha * (Y - f)
+    ic_expr = ~ h + alpha * (Y - f),
+    targeting_steps = list(
+      m = list(),
+      ma = list(set = list(A = a))
+    )
   ))
 }
 
@@ -70,26 +74,46 @@ riesz_curve_catalog$cfmean_a0 <- function(nuis) {
   riesz_curve_catalog$cfmean_a(a = 0, nuis = nuis)
 }
 
-
 riesz_curve_catalog$ate <- function(nuis) {
-
   RieszCurve$new(
     nuis = nuis,
-    alpha = ~ A/g + (1 - A)/(1 - g),
+    alpha = ~ A / g - (1 - A) / (1 - g),
     f = ~ m,
     h = ~ m1 - m0,
-    ic_expr = ~ h + alpha * (Y - f)
+    ic_expr = ~ h + alpha * (Y - f),
+    targeting_steps = list(
+      m = list(),
+      m1    = list(set = list(A = 1)),
+      m0    = list(set = list(A = 0))
+    )
   )
 }
 
+#'
+#' @examples
+#' # nuisances needed for att:
+#' nuis_att <- function(data) {
+#' g_fit  <- nadir::lnr_logistic(data, A ~ L1 + L2 + L3)
+#' m0_fit <- nadir::lnr_glm(subset(data, A == 0), Y ~ L1 + L2 + L3)
+#'
+#' list(
+#'   g  = g_fit(data),
+#'   m0 = m0_fit(data),
+#'   p  = mean(data$A)
+#' )
+#' }
+#'
 riesz_curve_catalog$att <- function(nuis) {
-
   RieszCurve$new(
     nuis = nuis,
     alpha = ~ A + (A - g)/(g * (1 - g)),
     f = ~ m,
     h = ~ m1 - m0,
-    ic_expr = ~ A * (Y - m0) / mean(A) + (m1 - m0) - h
+    ic_expr = ~ A * (Y - m0) / mean(A) + (m1 - m0) - h,
+    targeting_steps = list(
+      m = list(),
+      m1 = list(set = list(A = 1)),
+      m0 = list(set = list(A = 0)))
   )
 }
 
@@ -104,7 +128,11 @@ riesz_curve_catalog$subgroup_mean <- function(v, nuis) {
     alpha = alpha_formula,
     f = ~ m,
     h = ~ mv,
-    ic_expr = ~ h + alpha * (Y - f)
+    ic_expr = ~ h + alpha * (Y - f),
+    targeting_steps = list(
+      m = list(),
+      mv = list(set = list(V = v))
+    )
   )
 }
 
@@ -115,7 +143,10 @@ riesz_curve_catalog$missing_mean <- function(nuis) {
     alpha = ~ R/pi,
     f = ~ m,
     h = ~ m,
-    ic_expr = ~ h + alpha * (Y - f)
+    ic_expr = ~ h + alpha * (Y - f),
+    targeting_steps = list(
+      m = list()
+    )
   )
 }
 
@@ -126,7 +157,10 @@ riesz_curve_catalog$mtp <- function(nuis) {
     alpha = ~ g_shift / g,
     f = ~ m,
     h = ~ m_shift,
-    ic_expr = ~ h + alpha * (Y - f)
+    ic_expr = ~ h + alpha * (Y - f),
+    targeting_steps = list(
+      m = list()
+    )
   )
 }
 

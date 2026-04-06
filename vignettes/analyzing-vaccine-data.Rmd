@@ -122,16 +122,19 @@ rc <- function(delta, name){return(RieszCurve$new(
   h = ~ m1,
   f = ~ m,
   alpha = ~ r / (1 - r),
-  ic_expr = ~ h + alpha * (Y - f)
+  ic_expr = ~ h + alpha * (Y - f),
+  targeting_steps = list(
+    m = list(),
+    m1 = list(set = setNames(list(df_ct[[name]] + delta), name))
+  )
 ))}
 
 est_tmle_complete <- riesz_tmle(
   data = df_ct,
   rc = rc(1, "cd4_score_scaled"),
-  fluctuation = "logistic",
+  fluctuation_type = "logistic",
   bounds = c(min(df_ct$Y), max(df_ct$Y)),
-  outcome_col = "Y",
-  use_intercept_and_weights = F
+  outcome_col = "Y"
 )
 
 ```
@@ -145,10 +148,9 @@ two_phase_tmle <- function(df, df_ct, delta, name){
   est_tmle_complete <- riesz_tmle(
     data = df_ct,
     rc = rc(delta, name),
-    fluctuation = "logistic",
+    fluctuation_type = "logistic",
     bounds = c(min(df_ct$Y), max(df_ct$Y)),
-    outcome_col = "Y",
-    use_intercept_and_weights = F
+    outcome_col = "Y"
   )
 
   # Add the estimated EIF from the previous step to the data
@@ -179,16 +181,19 @@ two_phase_tmle <- function(df, df_ct, delta, name){
     h = ~ m1,
     f = ~ m,
     alpha = ~ invprop,
-    ic_expr = ~ h + alpha * (Y - f)
+    ic_expr = ~ h + alpha * (Y - f),
+    targeting_steps = list(
+      m = list(),
+      m1 = list(set = list(casecontrol = 1))
+    )
   )
 
   est_tmle <- riesz_tmle(
     data = df_updated,
     rc = rc_cc,
-    fluctuation = "logistic",
+    fluctuation_type = "logistic",
     bounds = c(min(df_updated$Y), max(df_updated$Y)),
-    outcome_col = "Y",
-    use_intercept_and_weights = F
+    outcome_col = "Y"
   )
 
   return(est_tmle)

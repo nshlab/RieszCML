@@ -6,9 +6,9 @@ output: html_document
 ```{r}
 library(RieszCML)
 
-set.seed(2026)
+set.seed(1235)
 
-n <- 400
+n <- 30
 
 # Strong confounding + near positivity problems
 L <- rnorm(n)
@@ -47,6 +47,23 @@ rc_bad <- RieszCurve$new(
   ic_expr = ~ h + alpha * (Y - f)
 )
 
+rc_bad <- riesz_curve_catalog$cfmean_a1(nuis = function(data) {
+    # intentionally poor outcome regression
+    m_fit <- lm(Y ~ L + A, data = data)
+
+    data1 <- data
+    data1$A <- 1
+
+    # propensity fit
+    g_fit <- glm(A ~ L, family = binomial(), data = data)
+
+    list(
+      m = predict(m_fit, newdata = data),
+      ma = predict(m_fit, newdata = data1),
+      g = predict(g_fit, newdata = data, type = "response")
+    )
+  })
+
 # One-step
 est_os <- riesz_estimate(df, rc_bad)
 
@@ -54,10 +71,9 @@ est_os <- riesz_estimate(df, rc_bad)
 est_tmle <- riesz_tmle(
   data = df,
   rc = rc_bad,
-  fluctuation = "logistic",
+  fluctuation_type = "logistic",
   bounds = c(0, 1),
-  outcome_col = "Y",
-  use_intercept_and_weights = FALSE
+  outcome_col = "Y"
 )
 
 est_os
@@ -105,7 +121,10 @@ rc_awful <- RieszCurve$new(
   alpha = ~ I(A == 1) / g,
   f = ~ m,
   h = ~ ma,
-  ic_expr = ~ h + alpha * (Y - f)
+  ic_expr = ~ h + alpha * (Y - f),
+  targeting_steps = list(
+    m = list(),
+    ma = list(A = 1))
 )
 
 # One-step
@@ -115,7 +134,7 @@ est_os <- riesz_estimate(df, rc_awful)
 est_tmle <- riesz_tmle(
   data = df,
   rc = rc_awful,
-  fluctuation = "logistic",
+  fluctuation_type = "logistic",
   bounds = c(0, 1),
   outcome_col = "Y"
 )

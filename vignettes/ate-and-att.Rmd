@@ -160,8 +160,8 @@ rc_att <- riesz_curve_catalog$att(
 
     list(
       m = predict(m_fit, newdata = data),
-      m1 = predict(m_fit, newdata = data1),
       m0 = predict(m_fit, newdata = data0),
+      m1 = predict(m_fit, newdata = data1),
       g = predict(g_fit, newdata = data, type = "response")
     )
   }
@@ -176,6 +176,3 @@ c(
 )
 ```
 
-```{r}
-
-```

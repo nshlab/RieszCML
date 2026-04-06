@@ -64,7 +64,16 @@ rc1 <- function(delta, treatment){return(RieszCurve$new(
   h = ~ m1,
   f = ~ m,
   alpha = ~ invprop,
-  ic_expr = ~ h + alpha * (Y - f)
+  ic_expr = ~ h + alpha * (Y - f),
+  targeting_steps = list(
+    m = list(),
+    m1 = list(
+      set = c(
+        setNames(list(df$momage + delta), "momage"),
+        setNames(list(rep(1, nrow(df))), treatment)
+      )
+    )
+  )
 ))}
 
 #---------------------------------------------
@@ -95,7 +104,13 @@ rc2 <- function(delta){return(RieszCurve$new(
   h = ~ m1 - Y,
   f = ~ m,
   alpha = ~ r / (1 - r),
-  ic_expr = ~ h + alpha * (`h[j=1]` - f)
+  ic_expr = ~ h + alpha * (`h[j=1]` - f),
+  targeting_steps = list(
+      m = list(),
+      m1 = list(
+        set = list(momage = df$momage + delta)
+      )
+    )
 ))}
 
 #---------------------------------------------
@@ -121,10 +136,9 @@ est_onestep
 est_tmle <- riesz_tmle(
   data = df,
   rc = rc_composed(3, "Control"),
-  fluctuation = "logistic",
+  fluctuation_type = "logistic",
   bounds = c(min(df$Y), max(df$Y)),
-  outcome_col = "Y",
-  use_intercept_and_weights = TRUE
+  outcome_col = "Y"
 )
 
 
@@ -133,10 +147,9 @@ get_estimate <- function(treatment){
   est_tmle <- riesz_tmle(
     data = df,
     rc = rc_composed(3, treatment),
-    fluctuation = "logistic",
+    fluctuation_type = "logistic",
     bounds = c(min(df$Y), max(df$Y)),
-    outcome_col = "Y",
-    use_intercept_and_weights = TRUE
+    outcome_col = "Y"
   )
   data.frame(est = est_tmle$estimate, low = est_tmle$ci_low, high = est_tmle$ci_high, cat = treatment)
 

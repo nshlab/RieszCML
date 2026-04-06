@@ -64,6 +64,7 @@ RieszCurve <- R6::R6Class(
     alpha = NULL,  # a formula expression defining weights using nuis
     f = NULL,      # a formula expression defining f using nuis
     h = NULL,      # a formula expression defining h
+    targeting_steps = NULL, # a list specifying how to produce the targeted nuisance functions
 
     fit_nuis = NULL, # for storing the fit vectors
     fit_alpha = NULL,
@@ -78,7 +79,8 @@ RieszCurve <- R6::R6Class(
       alpha,
       f,
       h,
-      ic_expr = NULL) {
+      ic_expr = NULL,
+      targeting_steps = NULL) {
 
       # preflight checks for nuis
       if (is.list(nuis)) {
@@ -94,10 +96,8 @@ RieszCurve <- R6::R6Class(
       self$alpha <- alpha
       self$f <- f
       self$h <- h
-
-      if (! is.null(ic_expr)) {
-        self$ic_expr <- ic_expr
-      }
+      self$ic_expr <- ic_expr
+      self$targeting_steps <- targeting_steps
 
       return(invisible(self))
     },
@@ -108,7 +108,6 @@ RieszCurve <- R6::R6Class(
       } else if (is.list(self$nuis)) {
         # TODO: check that every list element is a
         # numeric vector here
-
         self$fit_nuis <- self$nuis
       }
 
@@ -158,6 +157,33 @@ RieszCurve <- R6::R6Class(
       }
 
       return(invisible(NULL))
+    },
+
+    .eval_formula = function(formula, data, nuis_list, extra = list()) {
+      expr <- formula[[2]]
+      env <- list2env(c(as.list(data), nuis_list, extra), parent = baseenv())
+      eval(expr, envir = env)
+    },
+
+    eval_alpha = function(data, nuis_list) {
+      self$.eval_formula(self$alpha, data, nuis_list)
+    },
+
+    eval_f = function(data, nuis_list) {
+      self$.eval_formula(self$f, data, nuis_list)
+    },
+
+    eval_h = function(data, nuis_list, f_value = NULL) {
+      self$.eval_formula(self$h, data, nuis_list, extra = list(f = f_value))
+    },
+
+    eval_ic = function(data, nuis_list, alpha, f, h) {
+      self$.eval_formula(
+        self$ic_expr,
+        data,
+        nuis_list,
+        extra = list(alpha = alpha, f = f, h = h)
+      )
     },
 
     print = function(...) {
