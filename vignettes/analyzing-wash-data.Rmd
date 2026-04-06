@@ -69,7 +69,7 @@ rc1 <- function(delta, treatment){return(RieszCurve$new(
 
 #---------------------------------------------
 # Stage 2 RieszCurve:
-#   parameter is E[h[j=1] | L1] under intervention A1 = 1
+#   parameter is E[h[j=1] | L1] under intervention A1 + delta
 #---------------------------------------------
 rc2 <- function(delta){return(RieszCurve$new(
   nuis = function(data) {
@@ -92,7 +92,7 @@ rc2 <- function(delta){return(RieszCurve$new(
       r = predict(r_fit, newdata = data_shift, type = "response")
     )
   },
-  h = ~ m1,
+  h = ~ m1 - Y,
   f = ~ m,
   alpha = ~ r / (1 - r),
   ic_expr = ~ h + alpha * (`h[j=1]` - f)
@@ -146,7 +146,7 @@ result <- bind_rows(lapply(unique(wash$tr), get_estimate))
 
 
 p <- ggplot(result) + 
-  geom_vline(aes(xintercept = mean(wash$whz)), color = "darkgray") +
+  #geom_vline(aes(xintercept = mean(wash$whz)), color = "darkgray") +
   geom_errorbar(aes(xmin = low, xmax = high, y = cat, color = cat)) + 
   geom_point(aes(x = est, y = cat, color = cat)) + 
   theme_minimal() + 
