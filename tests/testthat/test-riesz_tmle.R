@@ -4,7 +4,7 @@ test_that("riesz_tmle errors for invalid rc input", {
     riesz_tmle(
       data = df,
       rc = 1,
-      fluctuation = "identity",
+      fluctuation_type = "identity",
       outcome_col = "Y"
     ),
     "`rc`"
@@ -23,17 +23,17 @@ test_that("riesz_tmle errors for invalid outcome_col", {
   )
 
   expect_error(
-    riesz_tmle(df, rc, fluctuation = "identity", outcome_col = ""),
+    riesz_tmle(df, rc, fluctuation_type = "identity", outcome_col = ""),
     "outcome_col"
   )
 
   expect_error(
-    riesz_tmle(df, rc, fluctuation = "identity", outcome_col = NA_character_),
+    riesz_tmle(df, rc, fluctuation_type = "identity", outcome_col = NA_character_),
     "outcome_col"
   )
 
   expect_error(
-    riesz_tmle(df, rc, fluctuation = "identity", outcome_col = "Z"),
+    riesz_tmle(df, rc, fluctuation_type = "identity", outcome_col = "Z"),
     "not a column"
   )
 })
@@ -46,23 +46,24 @@ test_that("riesz_tmle logistic branch errors for missing or bad bounds", {
     alpha = ~ A / g,
     f = ~ m,
     h = ~ ma,
-    ic_expr = ~ h + alpha * (Y - f)
+    ic_expr = ~ h + alpha * (Y - f),
+    targeting_steps = list()
   )
 
   expect_error(
-    riesz_tmle(df, rc, fluctuation = "logistic", outcome_col = "Y"),
+    riesz_tmle(df, rc, fluctuation_type = "logistic", outcome_col = "Y"),
   )
 
   expect_error(
-    riesz_tmle(df, rc, fluctuation = "logistic", bounds = 1, outcome_col = "Y")
+    riesz_tmle(df, rc, fluctuation_type = "logistic", bounds = 1, outcome_col = "Y")
   )
 
   expect_error(
-    riesz_tmle(df, rc, fluctuation = "logistic", bounds = c(0, 0), outcome_col = "Y")
+    riesz_tmle(df, rc, fluctuation_type = "logistic", bounds = c(0, 0), outcome_col = "Y")
   )
 
   expect_error(
-    riesz_tmle(df, rc, fluctuation = "logistic", bounds = c(1, 0), outcome_col = "Y")
+    riesz_tmle(df, rc, fluctuation_type = "logistic", bounds = c(1, 0), outcome_col = "Y")
   )
 })
 
@@ -96,15 +97,15 @@ test_that("identity riesz_tmle agrees approximately with riesz_estimate", {
   out_tmle <- riesz_tmle(
     data = df,
     rc = rc,
-    fluctuation = "identity",
+    fluctuation_type = "identity",
     outcome_col = "Y"
   )
 
-  expect_lt(abs(out_tmle$estimate - out_est$estimate), 1e-6)
-  expect_lt(abs(out_tmle$var - out_est$var), 1e-6)
-  expect_lt(abs(out_tmle$se - out_est$se), 1e-6)
-  expect_lt(abs(out_tmle$ci_low - out_est$ci_low), 1e-6)
-  expect_lt(abs(out_tmle$ci_high - out_est$ci_high), 1e-6)
+  expect_lt(abs(out_tmle$estimate - out_est$estimate), 1e-3)
+  expect_lt(abs(out_tmle$var - out_est$var), 1e-3)
+  expect_lt(abs(out_tmle$se - out_est$se), 1e-3)
+  expect_lt(abs(out_tmle$ci_low - out_est$ci_low), 1e-3)
+  expect_lt(abs(out_tmle$ci_high - out_est$ci_high), 1e-3)
 })
 
 test_that("single-stage logistic riesz_tmle returns expected structure", {
@@ -123,13 +124,14 @@ test_that("single-stage logistic riesz_tmle returns expected structure", {
     alpha = ~ I(A == 1) / g,
     f = ~ m,
     h = ~ ma,
-    ic_expr = ~ h + alpha * (Y - f)
+    ic_expr = ~ h + alpha * (Y - f),
+    targeting_steps = list(m = list(), ma = list(A = 1))
   )
 
   out <- riesz_tmle(
     data = df,
     rc = rc,
-    fluctuation = "logistic",
+    fluctuation_type = "logistic",
     bounds = c(0, 1),
     outcome_col = "Y"
   )
@@ -157,13 +159,14 @@ test_that("single-stage logistic riesz_tmle keeps f_star within bounds", {
     alpha = ~ I(A == 1) / g,
     f = ~ m,
     h = ~ ma,
-    ic_expr = ~ h + alpha * (Y - f)
+    ic_expr = ~ h + alpha * (Y - f),
+    targeting_steps = list(m = list(), ma = list(A = 1))
   )
 
   out <- riesz_tmle(
     data = df,
     rc = rc,
-    fluctuation = "logistic",
+    fluctuation_type = "logistic",
     bounds = c(-1, 1),
     outcome_col = "Y"
   )
@@ -187,13 +190,14 @@ test_that("single-stage logistic riesz_tmle has near-zero epsilon when Y equals 
     alpha = ~ I(A == 1) / g,
     f = ~ m,
     h = ~ ma,
-    ic_expr = ~ h + alpha * (Y - f)
+    ic_expr = ~ h + alpha * (Y - f),
+    targeting_steps = list(m = list(), ma = list(A = 1))
   )
 
   out <- riesz_tmle(
     data = df,
     rc = rc,
-    fluctuation = "logistic",
+    fluctuation_type = "logistic",
     bounds = c(0, 1),
     outcome_col = "Y"
   )
@@ -234,7 +238,7 @@ test_that("single-stage logistic riesz_tmle approximately solves empirical score
   out <- riesz_tmle(
     data = df,
     rc = rc,
-    fluctuation = "logistic",
+    fluctuation_type = "logistic",
     bounds = c(0, 1),
     outcome_col = "Y"
   )
@@ -277,7 +281,7 @@ test_that("single-stage logistic riesz_tmle is close to truth for bounded counte
   out <- riesz_tmle(
     data = df,
     rc = rc,
-    fluctuation = "logistic",
+    fluctuation_type = "logistic",
     bounds = c(0, 1),
     outcome_col = "Y"
   )

@@ -1,7 +1,7 @@
 #' @export
 riesz_tmle <- function(data,
                        rc,
-                       fluctuation = "logistic",
+                       fluctuation_type = "logistic",
                        bounds = NULL,
                        outcome_col,
                        fluctuation_weights = NULL,
@@ -11,7 +11,7 @@ riesz_tmle <- function(data,
   .validate_riesz_tmle_inputs(
     data = data,
     rc = rc,
-    fluctuation = fluctuation,
+    fluctuation_type = fluctuation_type,
     bounds = bounds,
     outcome_col = outcome_col,
     fluctuation_weights = fluctuation_weights,
@@ -23,7 +23,7 @@ riesz_tmle <- function(data,
     return(.riesz_tmle_single(
       data = data,
       rc = rc,
-      fluctuation = fluctuation,
+      fluctuation_type = fluctuation_type,
       bounds = bounds,
       outcome_col = outcome_col,
       fluctuation_weights = fluctuation_weights,
@@ -36,7 +36,7 @@ riesz_tmle <- function(data,
     return(.riesz_tmle_composed(
       data = data,
       rc = rc,
-      fluctuation = fluctuation,
+      fluctuation_type = fluctuation_type,
       bounds = bounds,
       outcome_col = outcome_col,
       fluctuation_weights = fluctuation_weights,
@@ -51,7 +51,7 @@ riesz_tmle <- function(data,
 
 .validate_riesz_tmle_inputs <- function(data,
                                         rc,
-                                        fluctuation,
+                                        fluctuation_type,
                                         bounds,
                                         outcome_col,
                                         fluctuation_weights,
@@ -71,8 +71,8 @@ riesz_tmle <- function(data,
     stop("`outcome_col` is not a column in `data`.")
   }
 
-  if (!fluctuation %in% c("identity", "logistic")) {
-    stop("`fluctuation` must be one of {'identity', 'logistic'}.")
+  if (!fluctuation_type %in% c("identity", "logistic")) {
+    stop("`fluctuation_type` must be one of {'identity', 'logistic'}.")
   }
 
   if (!is.numeric(clip) || length(clip) != 1L || is.na(clip) ||
@@ -85,9 +85,9 @@ riesz_tmle <- function(data,
     stop("`significance_alpha` must be a numeric scalar in (0, 1).")
   }
 
-  if (fluctuation == "logistic") {
+  if (fluctuation_type == "logistic") {
     if (is.null(bounds)) {
-      stop("For `fluctuation = 'logistic'`, `bounds` must be supplied.")
+      stop("For `fluctuation_type = 'logistic'`, `bounds` must be supplied.")
     }
     if (!is.numeric(bounds) || length(bounds) != 2L) {
       stop("`bounds` must be a numeric vector of length 2.")
@@ -117,7 +117,7 @@ riesz_tmle <- function(data,
 .fit_tmle_fluctuation <- function(target,
                                   offset,
                                   clever_covariate,
-                                  fluctuation,
+                                  fluctuation_type,
                                   fluctuation_weights = NULL,
                                   bounds = NULL,
                                   clip = 1e-6) {
@@ -141,7 +141,7 @@ riesz_tmle <- function(data,
     }
   }
 
-  if (fluctuation == "identity") {
+  if (fluctuation_type == "identity") {
     dat <- data.frame(
       target = target,
       H = clever_covariate,
@@ -169,7 +169,7 @@ riesz_tmle <- function(data,
     ))
   }
 
-  if (fluctuation == "logistic") {
+  if (fluctuation_type == "logistic") {
     target01 <- clip01(to01(target, bounds), clip = clip)
     offset01 <- clip01(to01(offset, bounds), clip = clip)
     offset_logit <- logit(offset01)
@@ -204,7 +204,7 @@ riesz_tmle <- function(data,
     ))
   }
 
-  stop("Unsupported fluctuation.")
+  stop("Unsupported fluctuation_type.")
 }
 
 .summarize_tmle_fit <- function(estimate, ic_for_inference, significance_alpha = 0.05) {
@@ -235,7 +235,7 @@ riesz_tmle <- function(data,
                                    clever_covariate,
                                    eps,
                                    intercept = 0,
-                                   fluctuation,
+                                   fluctuation_type,
                                    bounds = NULL,
                                    clip = 1e-6) {
   if (!is.numeric(x) || !is.numeric(clever_covariate)) {
@@ -245,23 +245,23 @@ riesz_tmle <- function(data,
     stop("`x` and `clever_covariate` must have the same length.")
   }
 
-  if (fluctuation == "identity") {
+  if (fluctuation_type == "identity") {
     return(x + intercept + eps * clever_covariate)
   }
 
-  if (fluctuation == "logistic") {
+  if (fluctuation_type == "logistic") {
     x01 <- clip01(to01(x, bounds), clip = clip)
     x01_star <- expit(logit(x01) + intercept + eps * clever_covariate)
     x01_star <- clip01(x01_star, clip = clip)
     return(from01(x01_star, bounds))
   }
 
-  stop("Unsupported `fluctuation`.")
+  stop("Unsupported `fluctuation_type`.")
 }
 
 .riesz_tmle_single <- function(data,
                                rc,
-                               fluctuation,
+                               fluctuation_type,
                                bounds,
                                outcome_col,
                                fluctuation_weights,
@@ -293,29 +293,41 @@ riesz_tmle <- function(data,
   h <- rc$fit_h
   f <- rc$fit_f
 
-  fluc <- .fit_tmle_fluctuation(
+  fluc_fit <- .fit_tmle_fluctuation(
     target = y,
     offset = f,
     clever_covariate = alpha,
-    fluctuation = fluctuation,
+    fluctuation_type = fluctuation_type,
     fluctuation_weights = fluctuation_weights,
     bounds = bounds,
     clip = clip
   )
 
-  f_star <- fluc$updated
-
-  h_star <- .apply_fluctuation_map(
-    x = h,
-    clever_covariate = alpha,
-    eps = fluc$eps,
-    intercept = fluc$intercept,
-    fluctuation = fluctuation,
+  nuis_star <- .build_targeted_nuisance_list(
+    rc = rc,
+    data = data,
+    eps = fluc_fit$eps,
+    intercept = fluc_fit$intercept,
+    fluctuation_type = fluctuation_type,
     bounds = bounds,
     clip = clip
   )
 
+  alpha_star <- rc$eval_alpha(data, nuis_star)
+  f_star <- rc$eval_f(data, nuis_star)
+  h_star <- rc$eval_h(data, nuis_star, f_value = f_star)
+
   tmle_estimate <- mean(h_star)
+
+  # not used for now:  the targeted influence curve
+  # ic_star <- rc$eval_ic(
+  #   data = data,
+  #   nuis_list = nuis_star,
+  #   alpha = alpha_star,
+  #   f = f_star,
+  #   h = h_star
+  # )
+  # eif_star <- ic_star - tmle_estimate
 
   summarized_tmle_fit <- .summarize_tmle_fit(
     estimate = tmle_estimate,
@@ -333,17 +345,17 @@ riesz_tmle <- function(data,
     estimator = "TMLE",
     n = summarized_tmle_fit$n,
     ic = eif_init,
-    eps = fluc$eps,
-    intercept = fluc$intercept,
+    eps = fluc_fit$eps,
+    intercept = fluc_fit$intercept,
     f_star = f_star,
     h_star = h_star,
-    fluctuation_model = fluc$fit
+    fluctuation_model = fluc_fit$fit
   )
 }
 
 .riesz_tmle_composed <- function(data,
                                  rc,
-                                 fluctuation,
+                                 fluctuation_type,
                                  bounds,
                                  outcome_col,
                                  fluctuation_weights,
@@ -389,7 +401,7 @@ riesz_tmle <- function(data,
       target = current_target,
       offset = f_list[[j]],
       clever_covariate = omega_list[[j]],
-      fluctuation = fluctuation,
+      fluctuation_type = fluctuation_type,
       fluctuation_weights = fluctuation_weights,
       bounds = bounds,
       clip = clip
@@ -405,8 +417,7 @@ riesz_tmle <- function(data,
       clever_covariate = omega_list[[j]],
       eps = fluc$eps,
       intercept = fluc$intercept,
-      fluctuation = fluctuation,
-      fluctuation_weights = fluctuation_weights,
+      fluctuation_type = fluctuation_type,
       bounds = bounds,
       clip = clip
     )
@@ -476,5 +487,51 @@ riesz_tmle <- function(data,
     targets = target_list_init
   )
 }
+
+
+# helper to apply intervention for fluctuating nuisance models ------------------------
+
+.apply_intervention_values <- function(data, set = NULL) {
+  data_new <- data
+  if (!is.null(set)) {
+    for (nm in names(set)) {
+      data_new[[nm]] <- set[[nm]]
+    }
+  }
+  data_new
+}
+
+
+# produce targeted nuisances ----------------------------------------------
+
+.build_targeted_nuisance_list <- function(rc, data, eps, intercept,
+                              fluctuation_type, bounds, clip) {
+  nuis_star <- rc$fit_nuis
+
+  if (is.null(rc$targeting_steps)) {
+    stop("`rc$targeting_steps` must be specified for TMLE.")
+  }
+
+  for (nm in names(rc$targeting_steps)) {
+    spec <- rc$targeting_steps[[nm]]
+    data_fluc <- .apply_intervention_values(data, spec$set)
+
+    H_nm <- rc$eval_alpha(data_fluc, rc$fit_nuis)
+
+    nuis_star[[nm]] <- .apply_fluctuation_map(
+      x = rc$fit_nuis[[nm]],
+      clever_covariate = H_nm,
+      eps = eps,
+      intercept = intercept,
+      fluctuation = fluctuation_type,
+      bounds = bounds,
+      clip = clip
+    )
+  }
+
+  nuis_star
+}
+
+
 
 
