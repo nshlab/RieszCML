@@ -14,6 +14,7 @@ RieszFit <- R6::R6Class(
     n = NULL,
 
     ic = NULL,
+    ic_star = NULL,
     eps = NULL,
     intercept = NULL,
     f_star = NULL,
@@ -33,6 +34,7 @@ RieszFit <- R6::R6Class(
                           parameter = NULL,
                           n = NULL,
                           ic = NULL,
+                          ic_star = NULL,
                           eps = NULL,
                           intercept = NULL,
                           f_star = NULL,
@@ -52,6 +54,7 @@ RieszFit <- R6::R6Class(
       self$n <- n
 
       self$ic <- ic
+      self$ic_star <- ic_star
       self$eps <- eps
       self$intercept <- intercept
       self$f_star <- f_star
@@ -104,6 +107,7 @@ RieszFit <- R6::R6Class(
 
       stored <- c()
       if (!is.null(self$ic)) stored <- c(stored, "ic")
+      if (!is.null(self$ic_star)) stored <- c(stored, "ic_star")
       if (!is.null(self$f_star)) stored <- c(stored, "f_star")
       if (!is.null(self$h_star)) stored <- c(stored, "h_star")
       if (!is.null(self$fluctuation_model)) stored <- c(stored, "fluctuation_model")
@@ -130,6 +134,7 @@ RieszFit <- R6::R6Class(
         parameter = self$parameter,
         n = self$n,
         ic = self$ic,
+        ic_star = self$ic_star,
         eps = self$eps,
         intercept = self$intercept,
         f_star = self$f_star,

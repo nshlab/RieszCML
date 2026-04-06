@@ -320,14 +320,14 @@ riesz_tmle <- function(data,
   tmle_estimate <- mean(h_star)
 
   # not used for now:  the targeted influence curve
-  # ic_star <- rc$eval_ic(
-  #   data = data,
-  #   nuis_list = nuis_star,
-  #   alpha = alpha_star,
-  #   f = f_star,
-  #   h = h_star
-  # )
-  # eif_star <- ic_star - tmle_estimate
+  ic_star <- rc$eval_ic(
+    data = data,
+    nuis_list = nuis_star,
+    alpha = alpha_star,
+    f = f_star,
+    h = h_star
+  )
+  eif_star <- ic_star - tmle_estimate
 
   summarized_tmle_fit <- .summarize_tmle_fit(
     estimate = tmle_estimate,
@@ -345,6 +345,7 @@ riesz_tmle <- function(data,
     estimator = "TMLE",
     n = summarized_tmle_fit$n,
     ic = eif_init,
+    ic_star = eif_star,
     eps = fluc_fit$eps,
     intercept = fluc_fit$intercept,
     f_star = f_star,
@@ -436,6 +437,13 @@ riesz_tmle <- function(data,
   ic_for_inference <- untargeted_ic$ic
   plugin_estimate <- untargeted_ic$psi
 
+  targeted_ic <- .compute_targeted_ic_composed(
+    y = y,
+    omega_list = omega_list,
+    f_star_list = f_star_list,
+    h_star_list = h_star_list
+  )
+
   summarized_tmle_fit <- .summarize_tmle_fit(
     estimate = tmle_estimate,
     ic_for_inference = ic_for_inference,
@@ -454,6 +462,7 @@ riesz_tmle <- function(data,
     eps = eps_vec,
     intercept = intercept_vec,
     ic = ic_for_inference,
+    ic_star = targeted_ic,
     f_star = f_star_list,
     h_star = h_star_list,
     fluctuation_models = fluctuation_models,
@@ -462,6 +471,25 @@ riesz_tmle <- function(data,
   )
 }
 
+.compute_targeted_ic_composed <- function(y,
+                                          omega_list,
+                                          f_star_list,
+                                          h_star_list) {
+  J <- length(omega_list)
+  n <- length(y)
+
+  ic <- rep(0, n)
+
+  current_target <- y
+  for (j in seq_len(J)) {
+    ic <- ic + omega_list[[j]] * (current_target - f_star_list[[j]])
+    current_target <- h_star_list[[j]]
+  }
+
+  ic <- ic + h_star_list[[J]]
+
+  ic
+}
 
 .compute_untargeted_ic_composed <- function(y, omega_list, f_list, h_list) {
   n <- length(y)
