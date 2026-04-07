@@ -1,0 +1,162 @@
+---
+title: "Analyzing-WASH-data"
+output: html_document
+---
+
+Load packages and the data
+```{R}
+library(devtools)
+load_all('/home/salbalkus/Research/RieszCML/')
+
+library(nadir)
+library(readr)
+library(tidyverse)
+library(glmnet)
+library(here)
+# library(vaccine)
+
+
+```
+
+First, load and clean the vaccine trial data.
+```{R}
+
+large_data <- read_csv("https://raw.githubusercontent.com/nhejazi/pub_txshift_biometrics/refs/heads/master/application/data/primary505_for_sharing.csv") %>%
+  select(pub_id, casecontrol, HIVwk28preunbl, trt, age, racecc, BMI, bhvrisk)
+
+subsample_data<- read_csv("https://raw.githubusercontent.com/nhejazi/pub_txshift_biometrics/refs/heads/master/application/data/janes_ipc_weights.csv") %>%
+  select(pub_id,                              # for censoring indicator
+         cd4_score_scaled, cd8_score_scaled,  # immune markers from Janes et al
+  ) 
+
+# Get weights from Nima's paper
+hvtn505_missing_baseline <-
+  which(is.na(large_data$bhvrisk) | is.na(large_data$BMI))
+cens_ind <- (large_data$pub_id %in% subsample_data$pub_id) %>%
+  enframe(name = NULL) %>%
+  slice(-hvtn505_missing_baseline) %>%
+  unlist() %>%
+  as.numeric()
+hvtn505_ipcw <- read_csv("https://raw.githubusercontent.com/nhejazi/pub_txshift_biometrics/refs/heads/master/application/data/hvtn505_ipc_weights.csv")
+
+subsample_data <- subsample_data %>% cbind(wt = hvtn505_ipcw$ipc_weights[cens_ind == 1])
+
+df <- left_join(large_data, subsample_data, by = "pub_id")
+df_c <- df %>% drop_na()
+df_ct <- df_c %>% filter(df_c$trt == 1)
+df_t <- df %>% filter(trt == 1)
+
+nuisances <- readRDS(here("vignettes", "cd4_nuisance_delta_grid.rds"))
+
+```
+
+This code will apply our algorithm manually
+
+```{R}
+estimate <- function(df_t, df_ct, delta){
+  Y = df_ct$HIVwk28preunbl
+  wt = df_ct$wt
+  Qn = nuisances$Qn[[as.character(delta)]] %>% filter(df_c$trt == 1)
+  gn = nuisances$gn[[as.character(delta)]] %>% filter(df_c$trt == 1)
+
+  f = Qn$Qn_natural
+  hf = Qn$Qn_shifted
+
+  rr = gn$gn_downshift / gn$gn_natural
+  hrr = ifelse(gn$gn_upshift != 0, (gn$gn_natural / gn$gn_upshift), 0) + as.numeric(gn$gn_upupshift == 0)
+
+  # onestep
+  ic = Qn$Qn_shifted + rr * (df_ct$HIVwk28preunbl - Qn$Qn_natural)
+
+  df_update <- left_join(df_t, data.frame(pub_id = df_ct$pub_id, ic = ic), by = "pub_id")
+  df_complete <- df_update %>% drop_na()
+  df_update[is.na(df_update)] <- 0  
+  ic_model <- lm(ic ~ HIVwk28preunbl, data = df_complete)
+  
+  hf2 <- f2 <- predict(ic_model, df_update)
+  rr2 <- df_update$wt
+  ic2 = hf2 + rr2 * (df_update$ic - f2)
+
+  ci = 1.96 * sqrt(var(ic2) / length(ic2))
+  os = mean(ic2) + c(0, -1, 1)*ci
+  names(os) <- c("est", "lo", "hi")
+  os
+
+  scale01 <- function(x){(x - min(ic)) / (max(ic) - min(ic))}
+  scale <- function(x){(x * (max(ic) - min(ic)) + min(ic))}
+
+    # Nima's TMLE
+  # The problem appears to be that the "intervened Riesz representer" is setting over 20% of the observations
+  # to have no shift because they are out of the support. 
+  # Let's test if this is true. Start by targeting the weights. Can't normally do this in RR, but whatever
+  tmp_df = data.frame(ic = ifelse(rr2 == 0, 0, hf2 / rr2), C = df_t$casecontrol, off = ifelse(rr2 == 0, -40, logit(1 / rr2)), casecontrol=df_t$casecontrol)
+  g_model <- glm(C ~ 0 + ic, offset = off,
+        data = tmp_df,
+        family = "binomial",
+  )
+  
+  rr2 <- df_t$casecontrol / predict(g_model, tmp_df, type = "response")
+
+  fluct <- glm(Y ~ 0 + rr, offset = off, weight = w, data = data.frame(Y = Y, rr = rr, off = logit(f), w = rr2[df_t$casecontrol == 1]), family = "binomial")
+  f <- predict(fluct, data.frame(rr = rr, off = logit(f)), type = "response")
+  hf <- predict(fluct, data.frame(rr = hrr, off = logit(hf)), type = "response")
+  
+  ic = hf + rr * (df_ct$HIVwk28preunbl - f)
+
+  df_update <- left_join(df_t, data.frame(pub_id = df_ct$pub_id, ic = ic), by = "pub_id")
+  df_complete <- df_update %>% drop_na()
+  df_update[is.na(df_update)] <- 0  
+  ic_model <- lm(ic ~ HIVwk28preunbl, data = df_complete)
+  
+  hf2 <- f2 <- predict(ic_model, df_update)
+  ic2 = hf2 + rr2 * (df_update$ic - f2)
+
+  ci = 1.96 * sqrt(var(ic2) / length(ic2))
+  os = mean(ic2) + c(0, -1, 1)*ci
+  names(os) <- c("est", "lo", "hi")
+  os
+
+  wtmle = mean(hf) + c(0, -1, 1)*ci
+  names(wtmle) <- c("est", "lo", "hi")
+  wtmle
+  # our tmle
+  ic_scaled <- scale01(df_update$ic)
+  fluct2 <- glm(ic ~ 0 + rr2, offset = off, data = data.frame(ic = ic_scaled, rr2 = rr2, off = logit(scale01(f2))), family = "binomial")
+  hfstar <- scale(predict(fluct2, data.frame(rr2 = rr2, off = logit(scale01(hf2))), type = "response"))
+
+  tmle = mean(hfstar) + c(0, -1, 1)*ci
+  names(tmle) <- c("est", "lo", "hi")
+
+  return(rbind(os, tmle, wtmle))
+}
+
+estimate(df_t, df_ct, 1)
+
+
+```
+
+```{r}
+set.seed(2)
+shifts <- c(-2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2)
+cd4_results <- lapply(shifts, \(x) estimate(df_t, df_ct, x))
+cd4_ests <- sapply(cd4_results, \(x) c(est = x["tmle", "est"], lo = x["tmle", "lo"], hi = x["tmle", "hi"]))
+
+cd4_df <- data.frame(
+  shift = shifts,
+  est = cd4_ests[1, ],
+  lo = cd4_ests[2, ],
+  hi = cd4_ests[3, ]
+)
+
+ggplot(cd4_df, aes(x = shift, y = est)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = lo, ymax = hi), width = 0.1) +
+  labs(
+    title = "CD4 Estimates by Shift",
+    x = "Shift",
+    y = "Estimate"
+  ) +
+  theme_minimal()
+
+ggsave("plot.png")
+```
