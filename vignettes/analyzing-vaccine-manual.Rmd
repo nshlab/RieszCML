@@ -56,14 +56,14 @@ df_c <- df %>% drop_na()
 df_ct <- df_c %>% filter(df_c$trt == 1)
 df_t <- df %>% filter(trt == 1)
 
-nuisances <- readRDS(here("vignettes", "cd4_nuisance_delta_grid.rds"))
-
 ```
 
 This code will apply our algorithm manually
 
 ```{R}
-estimate <- function(df_t, df_ct, delta){
+estimate <- function(df_t, df_ct, delta, name){
+  nuisances <- readRDS(here("data", paste0(name, "_nuisance_delta_grid.rds")))
+
   Y = df_ct$HIVwk28preunbl
   Qn = nuisances$Qn[[as.character(delta)]] %>% filter(df_c$trt == 1)
   gn = nuisances$gn[[as.character(delta)]] %>% filter(df_c$trt == 1)
@@ -160,18 +160,24 @@ estimate <- function(df_t, df_ct, delta){
 }
 
 set.seed(2)
-estimate(df_t, df_ct, -1)
+estimate(df_t, df_ct, -1, "cd8")
 
 ```
 
 Construct results
 
 ```{r}
-set.seed(2)
 shifts <- c(-2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2)
-cd4_results <- lapply(shifts, \(x) estimate(df_t, df_ct, x))
+
+set.seed(2)
+cd4_results <- lapply(shifts, \(x) estimate(df_t, df_ct, x, "cd4"))
+
+set.seed(2)
+cd8_results <- lapply(shifts, \(x) estimate(df_t, df_ct, x, "cd8"))
+
 ```
 
+Analyze the CD4 data.
 ```{r}
 estimator <- "tmle"
 cd4_ests <- sapply(cd4_results, \(x) c(est = x[estimator, "est"], lo = x[estimator, "lo"], hi = x[estimator, "hi"]))
@@ -183,18 +189,57 @@ cd4_df <- data.frame(
   hi = cd4_ests[3, ]
 )
 
-ggplot(cd4_df, aes(x = shift, y = est)) +
+p1 <- ggplot(cd4_df, aes(x = shift, y = est)) +
   geom_point() +
   geom_errorbar(aes(ymin = lo, ymax = hi), width = 0.1) +
   labs(
-    title = "CD4 Estimates by Shift",
-    x = "Shift",
-    y = "Estimate"
+    title = "TML estimates of mean counterfactual HIV-1 infection risk under shifted CD4+ polyfunctionality",
+    subtitle = "with pointwise confidence intervals",
+    x = "Posited change in standardized CD4+ polyfunctionality (sd units)",
+    y = "Risk of HIV-1 infection in vaccine recipients"
   ) +
   theme_minimal()
-
-ggsave("sl_plot.png")
+p1
+ggsave("sl-data-analysis-cd4.png")
 ```
+
+Analyze the CD8 data.
+
+```{r}
+estimator <- "tmle"
+cd8_ests <- sapply(cd8_results, \(x) c(est = x[estimator, "est"], lo = x[estimator, "lo"], hi = x[estimator, "hi"]))
+
+cd8_df <- data.frame(
+  shift = shifts,
+  est = cd8_ests[1, ],
+  lo = cd8_ests[2, ],
+  hi = cd8_ests[3, ]
+)
+
+p2 <- ggplot(cd8_df, aes(x = shift, y = est)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = lo, ymax = hi), width = 0.1) +
+  labs(
+    title = "TML estimates of mean counterfactual HIV-1 infection risk under shifted CD8+ polyfunctionality",
+    subtitle = "with pointwise confidence intervals",
+    x = "Posited change in standardized CD8+ polyfunctionality (sd units)",
+    y = "Risk of HIV-1 infection in vaccine recipients"
+  ) +
+  theme_minimal() + 
+  theme()
+p2
+ggsave("sl-data-analysis-cd8.png")
+```
+
+And combine them.
+
+```{r}
+library(patchwork)
+(p1 / p2) & scale_y_continuous(limits = c(-0.005, 0.125), breaks = c(.00, .02, .04, .06, .08, .10, .12))
+ggsave("sl-data-analysis.png", width = 9, height = 9)
+
+```
+
 
 We can also save as a CSV. 
 ```{R}
@@ -214,8 +259,24 @@ for(y in working){
     method = y
   ))
 }
+cd4_df$name <- "cd4"
 
-write_csv(cd4_df, "data-analysis-results.csv")
+cd8_df <- c()
+for(y in working){
+  cd8_ests <- sapply(cd8_results, \(x) c(est = x[y, "est"], lo = x[y, "lo"], hi = x[y, "hi"]))
+
+  cd8_df <- rbind(cd8_df, data.frame(
+    shift = shifts,
+    est = cd8_ests[1, ],
+    lo = cd8_ests[2, ],
+    hi = cd8_ests[3, ],
+    method = y
+  ))
+}
+cd8_df$name <- "cd8"
+
+
+write_csv(rbind(cd4_df, cd8_df), here("data", "data-analysis-results.csv"))
 
 
 ```
