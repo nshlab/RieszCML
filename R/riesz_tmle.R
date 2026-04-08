@@ -319,16 +319,6 @@ riesz_tmle <- function(data,
 
   tmle_estimate <- mean(h_star)
 
-  # not used for now:  the targeted influence curve
-  ic_star <- rc$eval_ic(
-    data = data,
-    nuis_list = nuis_star,
-    alpha = alpha_star,
-    f = f_star,
-    h = h_star
-  )
-  eif_star <- ic_star - tmle_estimate
-
   summarized_tmle_fit <- .summarize_tmle_fit(
     estimate = tmle_estimate,
     ic_for_inference = eif_init,
@@ -345,7 +335,6 @@ riesz_tmle <- function(data,
     estimator = "TMLE",
     n = summarized_tmle_fit$n,
     ic = eif_init,
-    ic_star = eif_star,
     eps = fluc_fit$eps,
     intercept = fluc_fit$intercept,
     f_star = f_star,
