@@ -13,8 +13,16 @@ library(readr)
 library(tidyverse)
 library(glmnet)
 library(here)
+library(hal9001)
+library(txshift)
 # library(vaccine)
 
+trunc<-function(x){
+  out <- x
+  out[out < .001] <- .001
+  out[out > .999] <- .999
+  return(out)
+}
 
 ```
 
@@ -23,6 +31,8 @@ First, load and clean the vaccine trial data.
 
 large_data <- read_csv("https://raw.githubusercontent.com/nhejazi/pub_txshift_biometrics/refs/heads/master/application/data/primary505_for_sharing.csv") %>%
   select(pub_id, casecontrol, HIVwk28preunbl, trt, age, racecc, BMI, bhvrisk)
+
+large_data$racecc[large_data$racecc == "Hispanic/Other"] <- "HispanicOther"
 
 subsample_data<- read_csv("https://raw.githubusercontent.com/nhejazi/pub_txshift_biometrics/refs/heads/master/application/data/janes_ipc_weights.csv") %>%
   select(pub_id,                              # for censoring indicator
@@ -46,24 +56,24 @@ df_c <- df %>% drop_na()
 df_ct <- df_c %>% filter(df_c$trt == 1)
 df_t <- df %>% filter(trt == 1)
 
-nuisances <- readRDS(here("vignettes", "cd4_nuisance_delta_grid.rds"))
-
 ```
 
 This code will apply our algorithm manually
 
 ```{R}
-estimate <- function(df_t, df_ct, delta){
+estimate <- function(df_t, df_ct, delta, name){
+  nuisances <- readRDS(here("data", paste0(name, "_nuisance_delta_grid.rds")))
+
   Y = df_ct$HIVwk28preunbl
-  wt = df_ct$wt
   Qn = nuisances$Qn[[as.character(delta)]] %>% filter(df_c$trt == 1)
   gn = nuisances$gn[[as.character(delta)]] %>% filter(df_c$trt == 1)
 
   f = Qn$Qn_natural
   hf = Qn$Qn_shifted
 
-  rr = gn$gn_downshift / gn$gn_natural
+  rr = (gn$gn_downshift / gn$gn_natural) + as.numeric(gn$gn_upshift == 0)
   hrr = ifelse(gn$gn_upshift != 0, (gn$gn_natural / gn$gn_upshift), 0) + as.numeric(gn$gn_upupshift == 0)
+  #hrr = (gn$gn_natural / gn$gn_upshift)
 
   # onestep
   ic = Qn$Qn_shifted + rr * (df_ct$HIVwk28preunbl - Qn$Qn_natural)
@@ -71,9 +81,38 @@ estimate <- function(df_t, df_ct, delta){
   df_update <- left_join(df_t, data.frame(pub_id = df_ct$pub_id, ic = ic), by = "pub_id")
   df_complete <- df_update %>% drop_na()
   df_update[is.na(df_update)] <- 0  
-  ic_model <- lm(ic ~ HIVwk28preunbl, data = df_complete)
   
-  hf2 <- f2 <- predict(ic_model, df_update)
+  df_complete_clean <- df_complete %>% mutate(value = 1)  %>% spread(racecc, value,  fill = 0 ) %>% select(-pub_id, -casecontrol, -trt, -wt, -ic, -cd4_score_scaled, -cd8_score_scaled)
+  df_update_clean <- df_update %>% mutate(value = 1)  %>% spread(racecc, value,  fill = 0 ) %>% select(-pub_id, -casecontrol, -trt, -wt, -ic, -cd4_score_scaled, -cd8_score_scaled)
+  #ic_model <- lm(ic ~ HIVwk28preunbl, data = df_complete)
+  #mat_complete <- as.matrix(df_complete %>% mutate(value = 1)  %>% spread(racecc, value,  fill = 0 ) %>% select(-pub_id, -casecontrol, -trt, -wt, -ic, -cd4_score_scaled, -cd8_score_scaled))
+  #mat_update <- as.matrix(df_update %>% mutate(value = 1)  %>% spread(racecc, value,  fill = 0 ) %>% select(-pub_id, -casecontrol, -trt, -wt, -ic, -cd4_score_scaled, -cd8_score_scaled))
+  #ic_model <- fit_hal(mat_complete, ic)
+
+  ic_model <- super_learner(
+      data = cbind(ic = df_complete$ic, df_complete_clean),
+      formulas = list(
+        .default = ic ~ HIVwk28preunbl + age + BMI + Black + HispanicOther + bhvrisk,
+        glm_2 = ic ~ (HIVwk28preunbl + age + BMI + bhvrisk)^2 + (HIVwk28preunbl + age + BMI + bhvrisk)*(Black + HispanicOther),
+        glmnet_2 = ic ~ (HIVwk28preunbl + age + BMI + bhvrisk)^2 + (HIVwk28preunbl + age + BMI + bhvrisk)*(Black + HispanicOther),
+        glmnet_3 = ic ~ (HIVwk28preunbl + age + BMI + bhvrisk)^2 + (HIVwk28preunbl + age + BMI + bhvrisk)*(Black + HispanicOther)
+      ),
+      outcome_type = "continuous",
+      n_folds = 10,
+      learners = list(lnr_glm, lnr_glm, lnr_gam,
+                      lnr_glmnet, lnr_glmnet, lnr_glmnet,
+                      lnr_ranger, lnr_xgboost, lnr_hal, lnr_hal
+                      ),
+      ensemble_or_discrete = "ensemble",
+      extra_learner_args = list(
+        NULL, NULL, NULL,
+        list(alpha = 1), list(alpha = 0.5), list(alpha = 0.0), 
+        NULL, NULL, list(max_degree = 2, smoothness_orders = 1, num_knots = 50), list(max_degree = 2, smoothness_orders = 0, num_knots = 50)
+      )
+    )
+  ic_model$learner_weights
+  hf2 <- f2 <- predict(ic_model, cbind(ic = df_update$ic, df_update_clean))
+  #hf2 <- f2 <- predict(ic_model, mat_update)
   rr2 <- df_update$wt
   ic2 = hf2 + rr2 * (df_update$ic - f2)
 
@@ -82,64 +121,66 @@ estimate <- function(df_t, df_ct, delta){
   names(os) <- c("est", "lo", "hi")
   os
 
-  scale01 <- function(x){(x - min(ic)) / (max(ic) - min(ic))}
-  scale <- function(x){(x * (max(ic) - min(ic)) + min(ic))}
+  # our tmle
+  f2_scaled = (f2 - min(f2)) / (max(f2) - min(f2))
+  hf2_scaled = (hf2 - min(f2)) / (max(f2) - min(f2))
+  ic_scaled <- (df_update$ic - min(df_update$ic)) / (max(df_update$ic) - min(df_update$ic))
 
-    # Nima's TMLE
+  fluct2 <- glm(ic ~ 1, weight = rr2, offset = off, data = data.frame(ic = ic_scaled, rr2 = rr2, off = logit(trunc(f2_scaled))), family = "binomial")
+  hfstar <- predict(fluct2, data.frame(rr2 = rr2, off = logit(trunc(hf2_scaled))), type = "response")
+  hfstar <- hfstar * (max(ic) - min(ic)) + min(ic)
+  tmle = mean(hfstar) + c(0, -1, 1)*ci
+  names(tmle) <- c("est", "lo", "hi")
+  tmle
+
+  #fluct2 <- glm(ic ~ 0 + rr2, offset = off, data = data.frame(ic = ic, rr2 = rr2[df_update$casecontrol == 1], off = f2[df_update$casecontrol == 1]), family = "gaussian")
+  #hfstar <- predict(fluct2, data.frame(rr2 = rr2, off = hf2), type = "response")
+
+  # Nima's TMLE
   # The problem appears to be that the "intervened Riesz representer" is setting over 20% of the observations
   # to have no shift because they are out of the support. 
   # Let's test if this is true. Start by targeting the weights. Can't normally do this in RR, but whatever
-  tmp_df = data.frame(ic = ifelse(rr2 == 0, 0, hf2 / rr2), C = df_t$casecontrol, off = ifelse(rr2 == 0, -40, logit(1 / rr2)), casecontrol=df_t$casecontrol)
+  tmp_df = data.frame(ic = hf2 * rr2, C = df_t$casecontrol, off = ifelse(rr2 == 0, 0, logit(1 / rr2)), casecontrol=df_t$casecontrol)
   g_model <- glm(C ~ 0 + ic, offset = off,
         data = tmp_df,
         family = "binomial",
   )
   
-  rr2 <- df_t$casecontrol / predict(g_model, tmp_df, type = "response")
+  rr2star <- df_t$casecontrol / predict(g_model, tmp_df, type = "response")
+  rr2star_c <- rr2star[df_t$casecontrol == 1]
 
-  fluct <- glm(Y ~ 0 + rr, offset = off, weight = w, data = data.frame(Y = Y, rr = rr, off = logit(f), w = rr2[df_t$casecontrol == 1]), family = "binomial")
-  f <- predict(fluct, data.frame(rr = rr, off = logit(f)), type = "response")
-  hf <- predict(fluct, data.frame(rr = hrr, off = logit(hf)), type = "response")
-  
-  ic = hf + rr * (df_ct$HIVwk28preunbl - f)
+  fluct <- glm(Y ~ 0 + rr, offset = off, weight = w, data = data.frame(Y = Y, rr = rr, off = f, w = rr2star_c), family = "gaussian")
+  fstarw <- predict(fluct, data.frame(rr = rr, off = f, w = rr2star_c), type = "response")
+  hfstarw <- predict(fluct, data.frame(rr = hrr, off = hf, w = rr2star_c), type = "response")
 
-  df_update <- left_join(df_t, data.frame(pub_id = df_ct$pub_id, ic = ic), by = "pub_id")
-  df_complete <- df_update %>% drop_na()
-  df_update[is.na(df_update)] <- 0  
-  ic_model <- lm(ic ~ HIVwk28preunbl, data = df_complete)
-  
-  hf2 <- f2 <- predict(ic_model, df_update)
-  ic2 = hf2 + rr2 * (df_update$ic - f2)
-
-  ci = 1.96 * sqrt(var(ic2) / length(ic2))
-  os = mean(ic2) + c(0, -1, 1)*ci
-  names(os) <- c("est", "lo", "hi")
-  os
-
-  wtmle = mean(hf) + c(0, -1, 1)*ci
+  wtmle = mean(hfstarw) + c(0, -1, 1)*ci
   names(wtmle) <- c("est", "lo", "hi")
-  wtmle
-  # our tmle
-  ic_scaled <- scale01(df_update$ic)
-  fluct2 <- glm(ic ~ 0 + rr2, offset = off, data = data.frame(ic = ic_scaled, rr2 = rr2, off = logit(scale01(f2))), family = "binomial")
-  hfstar <- scale(predict(fluct2, data.frame(rr2 = rr2, off = logit(scale01(hf2))), type = "response"))
-
-  tmle = mean(hfstar) + c(0, -1, 1)*ci
-  names(tmle) <- c("est", "lo", "hi")
-
+  wtmle  
   return(rbind(os, tmle, wtmle))
 }
 
-estimate(df_t, df_ct, 1)
-
+set.seed(2)
+estimate(df_t, df_ct, -1, "cd8")
 
 ```
 
+Construct results
+
 ```{r}
-set.seed(2)
 shifts <- c(-2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2)
-cd4_results <- lapply(shifts, \(x) estimate(df_t, df_ct, x))
-cd4_ests <- sapply(cd4_results, \(x) c(est = x["tmle", "est"], lo = x["tmle", "lo"], hi = x["tmle", "hi"]))
+
+set.seed(2)
+cd4_results <- lapply(shifts, \(x) estimate(df_t, df_ct, x, "cd4"))
+
+set.seed(2)
+cd8_results <- lapply(shifts, \(x) estimate(df_t, df_ct, x, "cd8"))
+
+```
+
+Analyze the CD4 data.
+```{r}
+estimator <- "tmle"
+cd4_ests <- sapply(cd4_results, \(x) c(est = x[estimator, "est"], lo = x[estimator, "lo"], hi = x[estimator, "hi"]))
 
 cd4_df <- data.frame(
   shift = shifts,
@@ -148,15 +189,94 @@ cd4_df <- data.frame(
   hi = cd4_ests[3, ]
 )
 
-ggplot(cd4_df, aes(x = shift, y = est)) +
+p1 <- ggplot(cd4_df, aes(x = shift, y = est)) +
   geom_point() +
   geom_errorbar(aes(ymin = lo, ymax = hi), width = 0.1) +
   labs(
-    title = "CD4 Estimates by Shift",
-    x = "Shift",
-    y = "Estimate"
+    title = "TML estimates of mean counterfactual HIV-1 infection risk under shifted CD4+ polyfunctionality",
+    subtitle = "with pointwise confidence intervals",
+    x = "Posited change in standardized CD4+ polyfunctionality (sd units)",
+    y = "Risk of HIV-1 infection in vaccine recipients"
   ) +
   theme_minimal()
+p1
+ggsave("sl-data-analysis-cd4.png")
+```
 
-ggsave("plot.png")
+Analyze the CD8 data.
+
+```{r}
+estimator <- "tmle"
+cd8_ests <- sapply(cd8_results, \(x) c(est = x[estimator, "est"], lo = x[estimator, "lo"], hi = x[estimator, "hi"]))
+
+cd8_df <- data.frame(
+  shift = shifts,
+  est = cd8_ests[1, ],
+  lo = cd8_ests[2, ],
+  hi = cd8_ests[3, ]
+)
+
+p2 <- ggplot(cd8_df, aes(x = shift, y = est)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = lo, ymax = hi), width = 0.1) +
+  labs(
+    title = "TML estimates of mean counterfactual HIV-1 infection risk under shifted CD8+ polyfunctionality",
+    subtitle = "with pointwise confidence intervals",
+    x = "Posited change in standardized CD8+ polyfunctionality (sd units)",
+    y = "Risk of HIV-1 infection in vaccine recipients"
+  ) +
+  theme_minimal() + 
+  theme()
+p2
+ggsave("sl-data-analysis-cd8.png")
+```
+
+And combine them.
+
+```{r}
+library(patchwork)
+(p1 / p2) & scale_y_continuous(limits = c(-0.005, 0.125), breaks = c(.00, .02, .04, .06, .08, .10, .12))
+ggsave("sl-data-analysis.png", width = 9, height = 9)
+
+```
+
+
+We can also save as a CSV. 
+```{R}
+
+working <- c("os", "tmle")
+y = "os"
+
+cd4_df <- c()
+for(y in working){
+  cd4_ests <- sapply(cd4_results, \(x) c(est = x[y, "est"], lo = x[y, "lo"], hi = x[y, "hi"]))
+
+  cd4_df <- rbind(cd4_df, data.frame(
+    shift = shifts,
+    est = cd4_ests[1, ],
+    lo = cd4_ests[2, ],
+    hi = cd4_ests[3, ],
+    method = y
+  ))
+}
+cd4_df$name <- "cd4"
+
+cd8_df <- c()
+for(y in working){
+  cd8_ests <- sapply(cd8_results, \(x) c(est = x[y, "est"], lo = x[y, "lo"], hi = x[y, "hi"]))
+
+  cd8_df <- rbind(cd8_df, data.frame(
+    shift = shifts,
+    est = cd8_ests[1, ],
+    lo = cd8_ests[2, ],
+    hi = cd8_ests[3, ],
+    method = y
+  ))
+}
+cd8_df$name <- "cd8"
+
+
+write_csv(rbind(cd4_df, cd8_df), here("data", "data-analysis-results.csv"))
+
+
 ```
