@@ -1,0 +1,107 @@
+% RieszCML hex sticker -------------------------------------------------------
+%
+% Concept: "recursive Riesz representation."
+% A sequence of nested Hilbert-space planes telescopes toward the upper right
+% (the sequential / composed structure of the package: Q_T -> ... -> Q_1).
+% Each plane carries the same motif: a vector f rising out of the plane, the
+% Riesz representer alpha lying in the plane (gold), and the orthogonal
+% projection of f onto alpha -- the geometric picture of  Psi(f) = <alpha, f>.
+%
+% Compile:  pdflatex rieszcml-hex.tex
+% Convert:  pdftoppm -png -r 600 rieszcml-hex.pdf logo
+% ----------------------------------------------------------------------------
+\documentclass[tikz,border=0mm]{standalone}
+
+\usepackage{lmodern}
+\usepackage[T1]{fontenc}
+\usetikzlibrary{arrows.meta,calc}
+
+% ---------------------------------------------------------------------------
+% Palette: deep indigo night + gold representer + ice-blue vector
+% ---------------------------------------------------------------------------
+\definecolor{hexfill}{RGB}{24,28,58}       % deep indigo background
+\definecolor{hexborder}{RGB}{168,182,232}  % periwinkle border
+\definecolor{planefill}{RGB}{56,66,120}    % Hilbert plane fill
+\definecolor{planeline}{RGB}{140,156,220}  % plane outline
+\definecolor{ice}{RGB}{170,214,255}        % the vector f
+\definecolor{gold}{RGB}{244,197,93}        % the Riesz representer alpha
+\definecolor{cream}{RGB}{240,234,214}      % text
+
+\newcommand{\HexR}{2.7}
+\newcommand{\hexpath}[1]{%
+  (90:#1) -- (150:#1) -- (210:#1) -- (270:#1) -- (330:#1) -- (30:#1) -- cycle}
+
+% ---------------------------------------------------------------------------
+% Projection motif on a plane, drawn in local coordinates.
+%   #1 = overall opacity multiplier (recursion fade)
+%   #2 = 1 to draw labels, 0 to omit (only front plane gets labels)
+% Plane parallelogram spanned by u=(1.05,0.13), v=(0.42,0.50) around origin.
+% ---------------------------------------------------------------------------
+\newcommand{\rieszmotif}[2]{%
+  % plane
+  \fill[planefill, opacity=#1*0.85]
+    (-1.05,-0.13) ++(-0.42,-0.50)
+    -- ++(2.10,0.26) -- ++(0.84,1.00) -- ++(-2.10,-0.26) -- cycle;
+  \draw[planeline, line width=1.1pt, opacity=#1]
+    (-1.05,-0.13) ++(-0.42,-0.50)
+    -- ++(2.10,0.26) -- ++(0.84,1.00) -- ++(-2.10,-0.26) -- cycle;
+  % alpha: representer in the plane (gold), from O toward u direction
+  \coordinate (O) at (-0.85,-0.28);
+  \coordinate (P) at (0.65,-0.09);   % projection point, on alpha's line
+  \coordinate (F) at (0.35,1.05);    % tip of f, rising out of the plane
+  \draw[gold, line width=1.6pt, -{Stealth[length=6pt,width=6pt]},
+        line cap=round, opacity=#1] (O) -- (1.05,-0.04);
+  % f: the functional's argument (ice blue)
+  \draw[ice, line width=1.6pt, -{Stealth[length=6pt,width=6pt]},
+        line cap=round, opacity=#1] (O) -- (F);
+  % projection drop (dashed) and foot marker
+  \draw[cream, line width=0.9pt, dash pattern=on 2.6pt off 2.2pt,
+        line cap=round, opacity=#1*0.9] (F) -- (P);
+  \fill[gold, opacity=#1] (P) circle (0.055);
+  % right-angle tick at the foot
+  \draw[cream, line width=0.7pt, opacity=#1*0.85]
+    ($(P)+(-0.16,-0.02)$) -- ($(P)+(-0.16,0.14)$) -- ($(P)+(0.0,0.16)$);
+  \ifnum#2=1
+    \node[ice,  font=\bfseries] at ($(F)+(-0.22,0.10)$) {$f$};
+    \node[gold, font=\bfseries] at (1.02,-0.30) {$\alpha$};
+  \fi
+}
+
+\begin{document}
+\begin{tikzpicture}
+
+% -- Hexagon ----------------------------------------------------------------
+\draw[hexborder, line width=3pt, fill=hexfill] \hexpath{\HexR};
+
+\begin{scope}
+  \clip \hexpath{0.94*\HexR};
+
+  % faint recursion guide: dotted line through the plane origins
+  \draw[planeline, opacity=0.35, line width=0.8pt,
+        dash pattern=on 0.8pt off 2.6pt, line cap=round]
+    (-0.85,-0.85) -- (1.85,1.45);
+
+  % telescoping planes: back to front so the front overdraws
+  \begin{scope}[shift={(1.35,1.05+.1)}, scale=0.36]
+    \rieszmotif{0.45}{0}
+  \end{scope}
+  \begin{scope}[shift={(0.70,0.38+.1)}, scale=0.60]
+    \rieszmotif{0.68}{0}
+  \end{scope}
+  \begin{scope}[shift={(-0.35,-0.60+.1)}, scale=1.0]
+    \rieszmotif{1.0}{1}
+  \end{scope}
+
+  % the identity, inscribed in the dark upper-left
+  \node[cream, opacity=0.92, anchor=west] at (-1.62,1.32)
+    {$\Psi(f)=\langle \alpha, f\rangle$};
+\end{scope}
+
+% -- Wordmark ----------------------------------------------------------------
+\node at (0,-1.50) {%
+  \fontsize{17}{17}\selectfont\ttfamily\bfseries
+  \textcolor{cream}{\{Riesz}\textcolor{gold}{CML}\textcolor{cream}{\}}%
+};
+
+\end{tikzpicture}
+\end{document}

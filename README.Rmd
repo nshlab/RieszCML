@@ -1,107 +1,296 @@
 ---
-title: "RieszCML"
+output:
+  github_document
+bibliography: "inst/REFERENCES.bib"
 ---
 
-I think a good syntax we could be going after would involve something like this:
+<!-- README.md is generated from README.Rmd. Please edit that file -->
 
-```{r}
-# select a riesz representer from the catalog 
-rc <- riesz_representer_catalog$ate
-
-# or any of
-rc <- riesz_representer_catalog$cfmean_a
-rc <- riesz_representer_catalog$cfmean_a1
-rc <- riesz_representer_catalog$cfmean_a0
-rc <- riesz_representer_catalog$att
-rc <- riesz_representer_catalog$cde # a joint-intervention -- similar to censoring -- joint on A and mediator 
-rc <- riesz_representer_catalog$nde 
-rc <- riesz_representer_catalog$mtp
-rc <- riesz_representer_catalog$subgroup_mean
-rc <- riesz_representer_catalog$longitudinal_ate
-rc <- riesz_representer_catalog$ade # average derivative effect
-# something for missingness mechanisms
-
-# what's inside the riesz representer? 
-rc$name 
-rc$description 
-rc$mapping # maps causal labels to data ( e.g., A |-> 'trt' )
-rc$required_nuisances # a character vector like c('Q_a', 'g') 
-rc$representer_weights(data, ) 
-rc$eif(data, representer_weights, nuis)   # efficient influence function (depends on a vector riesz representer values [weights] and nuisances) 
-rc$estimate # function to produce an estimate of the parameter
-
-# what we can do with it:
-
-riesz_estimate(data = data, representer = rc, nuisances = nuis)
-riesz_tmle(data = data, representer = rc, nuisances = nuis)
-# where nuis is a named list of functions that take data |-> estimate nuisance
-# parameter
-
-# aspirationally, we want to be able to compose representers per Sal's 
-# theorem 
-riesz_representer_subgroup_mtp <- riesz_compose(
-  list(
-    riesz_representer_catalog$subgroup_mean,
-    riesz_representer_catalog$mtp
-  )
+```{r, echo = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.path = "man/figures/README-"
 )
-
-# or subgroup-specific average derivative effects
-riesz_representer_subgroup_ade <- riesz_compose(
-  list(
-    riesz_representer_catalog$subgroup_mean,
-    riesz_representer_catalog$ade
-  )
-)
-
-# I think the right way to think about this will be in "layers" of representers; 
-# e.g., the indexing that Sal uses in Theorem 2. 
-# 
-# And after the required nuisance functions and estimating the representer 
-# from one layer, it becomes available to the next layer?  and the subsequent
-# layers treat the prior representers as named 'required_nuisances'?
-
-# riesz_estimate should handle:
-#  - cross fitting required nuisances
-#    - could be nice to use origami::make_folds if we anticipate non-iid settings(?)
-# 
-#  ***** 
-#   Sal suggests keeping as simple as possible, and just not doing cross-fitting;
-#   AND 
-#   If we set it up so that the user can pass values for `nuisances` then they can
-#   figure out cross-fitting themselves. 
-#  *****
-# 
-#  - if passed a ComposedRieszRepresenter (e.g., a list of RieszRepresenters) 
-#    then perform estimation sequentially 
-#    - perhaps that means calling riesz_estimate_single_representer (an internal fn)
-#      either once or repeatedly 
-#
-# riesz_tmle should handle
-#  - fluctuation at every layer of a ComposedRieszRepresenter or 
-#    the one fluctuation for the single-timepoint estimators
-# 
-# both riesz_estimate and riesz_tmle should return psi_hat, EIFs, std errors, 
-# confidence intervals, etc. 
 ```
 
+# `{RieszCML}` <img src='man/figures/logo.png' align='right' height='276' alt='RieszCML logo' />
 
-# Need to Figure Out 
+<!-- badges: start -->
+<!-- [![R-CMD-check](https://github.com/nshlab/RieszCML/workflows/R-CMD-check/badge.svg)](https://github.com/nshlab/RieszCML/actions) --> 
+[![Project Status: WIP – Initial development is in progress.](https://www.repostatus.org/badges/latest/wip.svg)](https://www.repostatus.org/#wip)
+[![MIT license](https://img.shields.io/badge/license-MIT-brightgreen.svg)](https://opensource.org/licenses/MIT)
+<!-- badges: end -->
 
- - A data <-> labels interface -- probably similar to what I've already done 
- in the CausalData R6 TargetedLearning implementation -- 
-   - or maybe I don't need this with the way nuis is described above 
-   - an alternative might be to store inside the RieszRepresenter objects 
-   something called
-   `rc$mapping` that defines a mapping like 
-     A |-> 'trt'
-     L |-> c('confounder1', 'confounder2')
-     Y |-> 'outcome'
-     Delta |-> 'mis'
+> Riesz Representers for Causal Machine Learning
 
- - I think this implies that behind the scenes longitudinal_ate will be a 
- `ComposedRieszRepresenter` object. 
- 
- - Haven't thought at all about vector-valued parameters ... is that
- something I need to think about? 
+Software written by [Christian Testa](https://ctesta.com), 
+[Salvador V. Balkus](https://salbalkus.github.io), and 
+[Nima S. Hejazi](https://nimahejazi.org). 
 
+---
+
+## What's `RieszCML`?
+
+The `RieszCML` R package provides a unified framework for constructing
+asymptotically efficient, doubly-robust estimators — both one-step and
+targeted minimum loss-based estimators (TMLE) — of statistical functionals
+whose efficient influence function (EIF) can be expressed in terms of a
+*Riesz representer* [@balkus2026riesz; @chernozhukov2022automatic; @hirshberg2021augmented].
+This class of functionals encompasses a wide range of estimands from causal
+inference and missing data problems, including counterfactual means, average
+treatment effects, effects of modified treatment policies, subgroup effects,
+direct and indirect effects from causal mediation analysis, and the effects
+of time-varying treatments in longitudinal settings subject to
+treatment-confounder feedback.
+
+Rather than requiring a bespoke derivation and implementation of the EIF for
+each new estimand, `RieszCML` asks the user to specify only a few modular
+ingredients of the target parameter:
+
+- a set of **nuisance function** estimates (e.g., outcome regressions,
+  propensity scores), fit by any means the user prefers;
+- a formula for the **Riesz representer** `alpha` (e.g., an inverse
+  probability weight or density ratio);
+- formulas `f` and `h` defining the regression being "residualized" and the
+  plug-in transformation appearing in the parameter mapping; and
+- an expression for the (uncentered) **influence curve**, typically of the
+  form `~ h + alpha * (Y - f)`.
+
+These ingredients are collected in a `RieszCurve` object, from which
+estimators and Wald-style inference follow automatically via
+`riesz_estimate()` (one-step) or `riesz_tmle()` (TMLE, with identity or
+logistic fluctuations). Nested and sequential estimands — for example,
+the iterated conditional expectations arising in longitudinal causal
+inference [@vanderlaan2012tmle; @diaz2021lmtp] or corrections for two-phase
+sampling designs [@rose2011twostage] — are handled compositionally by
+chaining `RieszCurve` objects together with `ComposedRieszCurve`, whose EIF
+involves a product of the stage-specific Riesz representers. Smooth
+transformations of one or more estimands (differences, risk ratios, odds
+ratios, and arbitrary user-specified contrasts) are supported through the
+delta method via `riesz_delta()` and friends.
+
+A catalog of pre-specified estimands is provided in `riesz_curve_catalog`,
+including the counterfactual mean under a static treatment
+(`cfmean_a`), the average treatment effect (`ate`), the average treatment
+effect among the treated (`att`), subgroup means (`subgroup_mean`), the mean
+of an outcome missing at random (`missing_mean`), and modified treatment
+policies (`mtp`). Nuisance function estimation may be carried out flexibly
+via the super learner algorithm [@vanderlaan2007super], as implemented in
+the [`nadir` package](https://github.com/ctesta01/nadir).
+
+`RieszCML` implements the methodology described in [@balkus2026riesz](https://arxiv.org/abs/2604.21721), which
+develops the sequential "Riesz EIF" representation underlying the package
+and its associated TMLE algorithms.
+
+---
+
+## Installation
+
+Install the *most recent version* of `RieszCML` from GitHub via
+[`remotes`](https://CRAN.R-project.org/package=remotes):
+
+```{r gh-installation, eval = FALSE}
+remotes::install_github("nshlab/RieszCML")
+```
+
+We also recommend installing [`nadir`](https://github.com/ctesta01/nadir),
+which allows ensemble machine learning to be used for nuisance parameter
+estimation:
+
+```{r nadir-installation, eval = FALSE}
+remotes::install_github("ctesta01/nadir")
+```
+
+---
+
+## Example
+
+To illustrate how `RieszCML` may be used to estimate the effect of a
+treatment, consider estimating the average treatment effect (ATE) in a
+simple point-treatment setting. We first simulate data with a known additive
+treatment effect:
+
+```{r example-sim}
+library(RieszCML)
+set.seed(1)
+
+n <- 5000
+tau <- 1.5
+
+L <- rnorm(n)
+A <- rbinom(n, size = 1, prob = plogis(L))
+Y <- 2 + L + tau * A + rnorm(n, sd = 0.25)
+
+df <- data.frame(L = L, A = A, Y = Y)
+```
+
+The ATE is available directly from the estimand catalog. The user supplies
+only a nuisance-fitting function returning the outcome regression evaluated
+at the natural and counterfactual treatment values, along with the
+propensity score:
+
+```{r example-rc}
+rc_ate <- riesz_curve_catalog$ate(
+  nuis = function(data) {
+    m_fit <- lm(Y ~ L + A, data = data)
+    g_fit <- glm(A ~ L, family = binomial(), data = data)
+
+    data1 <- data0 <- data
+    data1$A <- 1
+    data0$A <- 0
+
+    list(
+      m  = predict(m_fit, newdata = data),
+      m1 = predict(m_fit, newdata = data1),
+      m0 = predict(m_fit, newdata = data0),
+      g  = predict(g_fit, newdata = data, type = "response")
+    )
+  }
+)
+```
+
+A one-step (de-biased) estimate, with influence function-based inference,
+is then a single function call:
+
+```{r example-onestep}
+riesz_estimate(data = df, rc = rc_ate)
+```
+
+Alternatively, `riesz_tmle()` constructs a targeted minimum loss-based
+estimator by fluctuating the initial regression fit using the Riesz
+representer as a "clever covariate":
+
+```{r example-tmle}
+riesz_tmle(
+  data = df,
+  rc = rc_ate,
+  fluctuation_type = "identity",
+  outcome_col = "Y"
+)
+```
+
+More involved estimands are constructed compositionally. For example, the
+counterfactual mean under a two-timepoint treatment regime — a nested
+sequence of conditional expectations — may be estimated by composing one
+`RieszCurve` per timepoint via `ComposedRieszCurve`; corrections for
+outcomes missing at random or for two-phase sampling designs amount to
+prepending one further stage. See the package vignettes for worked examples
+covering longitudinal treatment regimes, missing outcomes, subgroup average
+derivative effects, delta-method contrasts, and super learning with
+cross-fitting.
+
+---
+
+## Issues
+
+If you encounter any bugs or have any specific feature requests, please
+[file an issue](https://github.com/nshlab/RieszCML/issues).
+
+---
+
+<!--- 
+## Contributions
+
+Contributions are very welcome. Interested contributors should consult our
+[contribution guidelines](https://github.com/nshlab/RieszCML/blob/main/CONTRIBUTING.md)
+prior to submitting a pull request.
+
+---
+---> 
+
+
+## Citation
+
+After using the `RieszCML` R package, please cite the following:
+
+    @article{balkus2026riesz,
+      author = {Balkus, Salvador V and Testa, Christian and Hejazi,
+        Nima S},
+      title = {A {Riesz} Representer Perspective on Targeted Learning},
+      year = {2026},
+      journal = {arXiv preprint arXiv:2604.21721},
+      url = {https://arxiv.org/abs/2604.21721}
+    }
+    
+    @software{balkus2026rieszcml-rpkg,
+      author = {Testa, Christian, Balkus, Salvador V and Hejazi,
+        Nima S},
+      title = {{RieszCML}: {Riesz} Representers for Causal Machine
+        learning},
+      year = {2026},
+      url = {https://github.com/nshlab/RieszCML},
+      note = {R package}
+    }
+
+---
+
+## More reading
+
+- [*A Riesz representer perspective on targeted
+  learning*](https://arxiv.org/abs/2604.21721) (Balkus, Testa, and Hejazi, 2026) - The companion paper to this package, deriving the sequential "Riesz EIF" for
+  nested linear functionals and the TMLE algorithms implemented in `RieszCML`.
+
+- [*Riesz representers for the rest of
+  us*](https://arxiv.org/abs/2507.19413) (Williams, Hines, and Rudolph, 2025) -
+  A gentle, worked-example introduction to the Riesz representation
+  theorem for epidemiologists, including a simple recursive algorithm for
+  deriving EIFs of estimands built from iterated conditional expectations.
+
+- [*Learning density ratios in causal inference using Bregman-Riesz
+  regression*](https://arxiv.org/abs/2510.16127) (Hines and Miles, 2025) -
+  Connects Riesz regression to density ratio estimation under Bregman
+  divergences, of interest when Riesz representers take the form of
+  density or probability ratios.
+
+- [*Two approaches to direct estimation of Riesz
+  representers*](https://arxiv.org/abs/2603.20936) (Bruns-Smith, 2026) -
+  Relates the "Riesz loss" of the automatic debiased machine learning
+  literature to an older sieve-based formulation from conditional moment
+  models, showing when the two direct estimation strategies coincide.
+
+- [*General targeted machine learning for modern causal mediation
+  analysis*](https://arxiv.org/abs/2408.14620) (Liu, Williams, Rudolph,
+  and Díaz, 2024) - A one-step estimation framework covering six families
+  of mediation estimands via sequential regressions and sequential Riesz
+  learning, implemented in the
+  [`crumble`](https://cran.r-project.org/package=crumble) R package.
+
+- [*Automatic debiased machine learning via Riesz
+  regression*](https://www.econometricsociety.org/event_papers/download/270/568/1/t2024emes.pdf)
+  (Chernozhukov, Newey, Quintas-Martínez, and Syrgkanis; Econometric
+  Society lecture) - The foundational proposal for estimating Riesz
+  representers directly via empirical risk minimization of a tailored
+  "Riesz loss", bypassing estimation of constituent nuisance components
+  such as propensity scores.
+
+- [*Riesz representer fitting under Bregman divergence: a unified
+  framework for debiased machine
+  learning*](https://arxiv.org/abs/2601.07752) (Kato, 2026) - A
+  generalized Riesz regression framework encompassing the squared-error
+  Riesz loss, tailored loss minimization, and covariate balancing as
+  special cases, with an accompanying [Python
+  package](https://github.com/MasaKat0/genriesz).
+
+---
+
+---
+
+## Funding
+
+The development of this software was supported in part by a grant from the
+National Science Foundation (award no.
+[DGE 2140743](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2140743)).
+
+---
+
+## License
+
+&copy; 2025-2026  Christian Testa, Salvador V. Balkus, Nima S. Hejazi
+
+The contents of this repository are distributed under the MIT license. See
+file `LICENSE.md` for details.
+
+---
+
+## References
