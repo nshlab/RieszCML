@@ -1,4 +1,5 @@
 
+
 #' Estimate a Statistical Parameter using a RieszCurve
 #'
 #' @export
@@ -21,7 +22,7 @@
 #'       m0 = m(datacf0),
 #'       g = g(data)))
 #'   },
-#'   alpha = ~ A/g + (1-A)/(1-g),
+#'   alpha = ~ A/g - (1-A)/(1-g),
 #'   f = ~ m,
 #'   h = ~ m1 - m0,
 #'   ic_expr = ~ h + alpha * (Y - f)
@@ -71,3 +72,4 @@ riesz_estimate <- function(data, rc, significance_alpha = 0.05) {
     ic = phi
   )
 }
+
