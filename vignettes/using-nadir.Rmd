@@ -1,18 +1,40 @@
 ---
-title: "Super Learner, cross-fitting"
+title: "Cross-fitted Super Learning with nadir"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{Super Learner, cross-fitting}
+  %\VignetteIndexEntry{Cross-fitted Super Learning with nadir}
   %\VignetteEngine{knitr::rmarkdown}
   \usepackage[utf8]{inputenc}
 ---
 
 ```{r, include = FALSE}
+# the version of nadir with crossfit_super_learner() is not (yet) on CRAN
+library(nadir)
+
+
 knitr::opts_chunk$set(
   collapse = TRUE,
   comment = "#>"
 )
 ```
+
+`{RieszCML}` is agnostic about how nuisance functions are estimated: the
+`nuis` function of a `RieszCurve` just has to return predictions for every
+row of `data`. This vignette shows how to plug in `{nadir}`'s Super Learner,
+first without and then with cross-fitting, using
+`nadir::crossfit_super_learner()`.
+
+Why cross-fit? The asymptotic guarantees of one-step estimators and TMLEs
+require the empirical process term to vanish, which holds either under
+Donsker (complexity) conditions on the nuisance estimators or, without any
+such conditions, when each observation's nuisance predictions come from
+models fit without that observation. Adaptive learners like random forests
+and gradient boosting can violate Donsker conditions, so cross-fitting is the
+safe default when they are in the library. `crossfit_super_learner()`
+implements this properly: on each outer training split it fits a *full*
+Super Learner — so the ensemble weights, not just the base learners, are
+estimated without the held-out fold — and returns out-of-fold predictions in
+the original row order, which is exactly what a `nuis` function must supply.
 
 ```{r}
 library(RieszCML)
@@ -54,23 +76,11 @@ truth_ate_mc <- function(n_mc = 2e6, seed = 123) {
   df_mc <- simulate_data(n_mc, seed = seed)
 
   eta_Y1 <- with(df_mc,
-    -0.8 +
-      0.8 * 1 +
-      0.6 * 1 * L1 -
-      0.5 * 1 * (L2 > 0) +
-      0.7 * sin(L1 * L3) +
-      0.4 * L2^2 -
-      0.3 * abs(L4)
+    -0.8 + 0.8 + 0.6 * L1 - 0.5 * (L2 > 0) +
+      0.7 * sin(L1 * L3) + 0.4 * L2^2 - 0.3 * abs(L4)
   )
-
   eta_Y0 <- with(df_mc,
-    -0.8 +
-      0.8 * 0 +
-      0.6 * 0 * L1 -
-      0.5 * 0 * (L2 > 0) +
-      0.7 * sin(L1 * L3) +
-      0.4 * L2^2 -
-      0.3 * abs(L4)
+    -0.8 + 0.7 * sin(L1 * L3) + 0.4 * L2^2 - 0.3 * abs(L4)
   )
 
   mean(plogis(eta_Y1) - plogis(eta_Y0))
@@ -78,32 +88,48 @@ truth_ate_mc <- function(n_mc = 2e6, seed = 123) {
 
 truth_ate <- truth_ate_mc()
 truth_ate
+```
 
-make_rc_ate <- function(nuis_fun) {
-  riesz_curve_catalog$ate(
-    nuis = nuis_fun
-  )
-}
+Both analyses share the same working formulas and learner library.
 
+```{r}
+outcome_formula <- Y ~ A + L1 + L2 + L3 + L4 +
+  I(L1 * L3) + I(L2^2) + I(abs(L4)) + A:L1 + A:I(L2 > 0)
+
+prop_formula <- A ~ L1 + L2 + L3 + L4 +
+  I(sin(L1)) + I(L2^2) + I(L3 * L4) + I(L1 > 0) + I(L2 > 1)
+
+learner_library <- list(
+  logistic = nadir::lnr_logistic,
+  rf       = nadir::lnr_rf_binary,
+  xgboost  = nadir::lnr_xgboost,
+  glmnet   = nadir::lnr_glmnet
+)
+
+set.seed(1)
+df <- simulate_data(4000, seed = 1)
+```
+
+## Super Learner nuisances without cross-fitting
+
+The simplest approach fits one Super Learner to all of the data and predicts
+in-sample. This is fine when the library contains only well-behaved
+(Donsker) learners, and serves as our baseline.
+
+```{r}
 make_nuis_superlearner_nocf <- function() {
   function(data) {
-    outcome_formula <- Y ~ A + L1 + L2 + L3 + L4 +
-      I(L1 * L3) + I(L2^2) + I(abs(L4)) + A:L1 + A:I(L2 > 0)
-
-    prop_formula <- A ~ L1 + L2 + L3 + L4 +
-      I(sin(L1)) + I(L2^2) + I(L3 * L4) + I(L1 > 0) + I(L2 > 1)
-
     m_fit <- nadir::super_learner(
       data = data,
       formula = outcome_formula,
-      learners = list(nadir::lnr_logistic, nadir::lnr_rf_binary, nadir::lnr_xgboost, nadir::lnr_glmnet),
+      learners = learner_library,
       outcome_type = "binary"
     )
 
     g_fit <- nadir::super_learner(
       data = data,
       formula = prop_formula,
-      learners = list(nadir::lnr_logistic, nadir::lnr_rf_binary, nadir::lnr_xgboost, nadir::lnr_glmnet),
+      learners = learner_library,
       outcome_type = "binary"
     )
 
@@ -113,21 +139,17 @@ make_nuis_superlearner_nocf <- function() {
     data0$A <- 0
 
     list(
-      m = predict(m_fit, data),
+      m  = predict(m_fit, data),
       m1 = predict(m_fit, data1),
       m0 = predict(m_fit, data0),
-      g = predict(g_fit, data)
+      g  = predict(g_fit, data)
     )
   }
 }
 
-set.seed(1)
-df <- simulate_data(4000, seed = 1)
-
-rc_ate_nocf <- make_rc_ate(make_nuis_superlearner_nocf())
 fit_ate_nocf <- riesz_tmle(
   data = df,
-  rc = rc_ate_nocf,
+  rc = riesz_curve_catalog$ate(nuis = make_nuis_superlearner_nocf()),
   fluctuation_type = "logistic",
   bounds = c(0, 1),
   outcome_col = "Y"
@@ -137,76 +159,55 @@ fit_ate_nocf
 c(estimate = fit_ate_nocf$estimate, truth = truth_ate)
 ```
 
+## Cross-fitted nuisances with `crossfit_super_learner()`
 
-# Now with Cross-Fitting
+`nadir::crossfit_super_learner()` handles the entire cross-fitting protocol
+that one would otherwise write by hand: it splits the data into `n_folds`
+outer folds, fits a full Super Learner (with its own `inner_n_folds`-fold
+internal CV for the ensemble weights) on each outer training split, and
+exposes the results through three accessors that map directly onto the
+nuisances a `RieszCurve` needs:
+
+* `$oof_predictions()` — out-of-fold predictions at the observed data, in
+  original row order: this is `m` (or `g`);
+* `$predict_modified(modify)` — out-of-fold predictions after applying an
+  intervention to each held-out fold, e.g. setting `A = 1`: this is `m1`;
+* `$sl_fits`, `$cv_loss`, `$fold_assignments` — diagnostics, used below.
 
 ```{r}
-options(future.globals.maxSize = Inf)
-make_folds <- function(n, V = 5, seed = 1) {
-  set.seed(seed)
-  sample(rep(seq_len(V), length.out = n))
-}
-
-make_nuis_superlearner_cf <- function(V = 5, seed = 1) {
+make_nuis_superlearner_cf <- function(n_folds = 5, inner_n_folds = 5) {
   function(data) {
-    n <- nrow(data)
-    fold_id <- make_folds(n, V = V, seed = seed)
-
-    m_hat <- numeric(n)
-    m1_hat <- numeric(n)
-    m0_hat <- numeric(n)
-    g_hat <- numeric(n)
-
-    outcome_formula <- Y ~ A + L1 + L2 + L3 + L4 +
-      I(L1 * L3) + I(L2^2) + I(abs(L4)) + A:L1 + A:I(L2 > 0)
-
-    prop_formula <- A ~ L1 + L2 + L3 + L4 +
-      I(sin(L1)) + I(L2^2) + I(L3 * L4) + I(L1 > 0) + I(L2 > 1)
-
-    for (v in seq_len(V)) {
-      train_idx <- which(fold_id != v)
-      valid_idx <- which(fold_id == v)
-
-      train <- data[train_idx, , drop = FALSE]
-      valid <- data[valid_idx, , drop = FALSE]
-
-      m_fit <- nadir::super_learner(
-        data = train,
-        formula = outcome_formula,
-      learners = list(nadir::lnr_logistic, nadir::lnr_rf_binary, nadir::lnr_xgboost, nadir::lnr_glmnet),
+    cf_m <- nadir::crossfit_super_learner(
+      data = data,
+      formulas = outcome_formula,
+      learners = learner_library,
+      n_folds = n_folds,
+      inner_n_folds = inner_n_folds,
       outcome_type = "binary"
-      )
+    )
 
-      g_fit <- nadir::super_learner(
-        data = train,
-        formula = prop_formula,
-      learners = list(nadir::lnr_logistic, nadir::lnr_rf_binary, nadir::lnr_xgboost, nadir::lnr_glmnet),
+    cf_g <- nadir::crossfit_super_learner(
+      data = data,
+      formulas = prop_formula,
+      learners = learner_library,
+      n_folds = n_folds,
+      inner_n_folds = inner_n_folds,
       outcome_type = "binary"
-      )
-
-      valid1 <- valid
-      valid0 <- valid
-      valid1$A <- 1
-      valid0$A <- 0
-
-      m_hat[valid_idx] <- predict(m_fit, valid)
-      m1_hat[valid_idx] <- predict(m_fit, valid1)
-      m0_hat[valid_idx] <- predict(m_fit, valid0)
-      g_hat[valid_idx] <- predict(g_fit, valid)
-    }
+    )
 
     list(
-      m = m_hat,
-      m1 = m1_hat,
-      m0 = m0_hat,
-      g = g_hat
+      m  = cf_m$oof_predictions(),
+      m1 = cf_m$predict_modified(function(d) { d$A <- 1; d }),
+      m0 = cf_m$predict_modified(function(d) { d$A <- 0; d }),
+      g  = cf_g$oof_predictions()
     )
   }
 }
-rc_ate_cf <- make_rc_ate(make_nuis_superlearner_cf(V = 5, seed = 1))
+
+set.seed(1)
 fit_ate_cf <- riesz_tmle(
   data = df,
-  rc = rc_ate_cf,
+  rc = riesz_curve_catalog$ate(nuis = make_nuis_superlearner_cf()),
   fluctuation_type = "logistic",
   bounds = c(0, 1),
   outcome_col = "Y"
@@ -216,3 +217,64 @@ fit_ate_cf
 c(estimate = fit_ate_cf$estimate, truth = truth_ate)
 ```
 
+Compared to a hand-rolled fold loop, note what came for free here: the
+ensemble weights of each fold's Super Learner were estimated without the
+held-out observations (a hand-rolled loop that calls `super_learner()` per
+fold gets this too, but only if written carefully); the validation folds are
+checked to be disjoint; predictions are reconstructed in original row order;
+and if any row were never held out, its prediction would be `NA` — which
+`RieszCurve$fit()` rejects loudly rather than letting a silently misaligned
+nuisance vector through.
+
+## Inspecting the cross-fit
+
+Because the fitted objects are retained, the cross-fit is easy to audit. It
+can be worth doing this *outside* the `nuis` function during exploratory
+work, then wrapping the final recipe as above:
+
+```{r}
+set.seed(1)
+cf_m <- nadir::crossfit_super_learner(
+  data = df,
+  formulas = outcome_formula,
+  learners = learner_library,
+  n_folds = 5,
+  outcome_type = "binary"
+)
+
+cf_m
+
+# honest empirical loss of the cross-fitted outcome predictions
+cf_m$cv_loss
+
+# ensemble weights estimated within each outer training split
+lapply(cf_m$sl_fits, `[[`, "learner_weights")
+
+# which outer fold held out each observation
+table(cf_m$fold_assignments)
+```
+
+Stable learner weights across folds suggest the ensemble is not being driven
+by a few influential observations; wildly varying weights are a hint to
+enlarge the library or the sample.
+
+## Practical notes
+
+**Sharing folds across nuisances.** As written, `m` and `g` are cross-fitted
+on independently drawn fold splits, which is standard and asymptotically
+valid. If you prefer that both nuisances share the same outer folds (e.g.
+for exact reproducibility of fold-level diagnostics), pass a common
+`cv_schema` function to both `crossfit_super_learner()` calls.
+
+**Parallelism.** Fitting is parallelized over outer folds via the `{future}`
+framework: load `{future}` and declare, e.g., `plan(multisession)` before
+calling `crossfit_super_learner()`; use
+`options(future.globals.maxSize = Inf)` if large learner objects need to be
+exported to workers. A nested topology (see `?future::plan`) additionally
+parallelizes the inner Super Learners. This vignette runs sequentially so it
+builds anywhere.
+
+**Cross-fitting the fluctuation?** `riesz_tmle()` fits its one-dimensional
+fluctuation on the full sample. This is the standard CV-TMLE-adjacent
+construction: with cross-fitted initial nuisances, the parametric
+fluctuation step does not reintroduce Donsker-type problems.
