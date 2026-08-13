@@ -250,14 +250,14 @@ cross-fitting.
 The [Riesz representation theorem](https://en.wikipedia.org/wiki/Riesz_representation_theorem#Statement) tells us that every bounded linear functional
 in a Hilbert space can be represented as an inner product with an 
 element $\alpha$ (particular to that functional) called the Riesz representer. Hilbert spaces can be thought
-of as spaces of functionals with a geometry reminiscent of Euclidean
+of as spaces of functions with a geometry reminiscent of Euclidean
 geometry, including the concept of **orthogonal projection**. 
 
 Since our article describes the construction of nested sequential one-step and 
 targeted maximum likelihood estimators based on using Riesz representers, our logo reflects this **recursive** 
 orthogonal projection structure. 
 
-Additionally, for fun, in the corner there is an important equation in the 
+Additionally, for fun, there is an important equation in the 
 upper left hand corner.
 
 ---
