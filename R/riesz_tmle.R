@@ -1,3 +1,36 @@
+#' Targeted Minimum Loss-Based Estimation for Riesz-Represented Functionals
+#'
+#' Constructs a TMLE for a linear functional represented by a [RieszCurve]
+#' (Algorithm 1 of the manuscript with a single stage) or a
+#' [ComposedRieszCurve] (sequential-regression TMLE, Algorithm 1).
+#'
+#' @param data A `data.frame`-like object containing the observed data.
+#' @param rc A [RieszCurve] or [ComposedRieszCurve]. For valid TMLE updates,
+#'   each curve must specify how its counterfactual predictions are updated:
+#'   via `targeting_steps` (single curves) and via `alpha_star` (each stage
+#'   of a composed curve whose `h` differs from its `f`).
+#' @param fluctuation_type One of `"logistic"` (recommended; requires
+#'   `bounds`) or `"identity"`.
+#' @param bounds Numeric vector of length 2 bounding the outcome scale, used
+#'   by the logistic fluctuation. In the composed case the same bounds are
+#'   applied to all intermediate targets, which are guaranteed to respect
+#'   them by construction of the logistic update.
+#' @param outcome_col Name of the outcome column in `data`.
+#' @param fluctuation_weights Optional nonnegative observation weights for
+#'   the fluctuation regressions.
+#' @param clip Clipping constant for the logistic fluctuation, in (0, 0.5).
+#' @param significance_alpha Significance level for Wald confidence
+#'   intervals, based on the variance of the estimated (untargeted) EIF.
+#' @param score_tol Multiple of the estimated standard error beyond which a
+#'   nonzero empirical mean of the targeted EIF estimating equation triggers
+#'   a warning. The targeted score should be numerically zero after a
+#'   successful TMLE update; a large value indicates a failed or
+#'   mis-specified targeting step.
+#'
+#' @return A [RieszFit]. `ic` holds the untargeted (inference) influence
+#'   curve; `ic_star` holds the targeted influence curve, whose mean equals
+#'   the TMLE estimate up to numerical error when the targeting step
+#'   succeeded.
 #' @export
 riesz_tmle <- function(data,
                        rc,
@@ -6,7 +39,8 @@ riesz_tmle <- function(data,
                        outcome_col,
                        fluctuation_weights = NULL,
                        clip = 1e-6,
-                       significance_alpha = 0.05) {
+                       significance_alpha = 0.05,
+                       score_tol = 0.05) {
 
   .validate_riesz_tmle_inputs(
     data = data,
@@ -28,7 +62,8 @@ riesz_tmle <- function(data,
       outcome_col = outcome_col,
       fluctuation_weights = fluctuation_weights,
       clip = clip,
-      significance_alpha = significance_alpha
+      significance_alpha = significance_alpha,
+      score_tol = score_tol
     ))
   }
 
@@ -41,7 +76,8 @@ riesz_tmle <- function(data,
       outcome_col = outcome_col,
       fluctuation_weights = fluctuation_weights,
       clip = clip,
-      significance_alpha = significance_alpha
+      significance_alpha = significance_alpha,
+      score_tol = score_tol
     ))
   }
 
@@ -129,6 +165,9 @@ riesz_tmle <- function(data,
   if (!is.numeric(clever_covariate) || length(clever_covariate) != n) {
     stop("`clever_covariate` must be numeric.")
   }
+  if (anyNA(target) || anyNA(offset) || anyNA(clever_covariate)) {
+    stop("`target`, `offset`, and `clever_covariate` cannot contain NA values.")
+  }
   if (!is.null(fluctuation_weights)) {
     if (!is.numeric(fluctuation_weights) || length(fluctuation_weights) != n) {
       stop("`fluctuation_weights` must be NULL or a numeric vector of length `target`.")
@@ -139,6 +178,25 @@ riesz_tmle <- function(data,
     if (any(fluctuation_weights < 0)) {
       stop("`fluctuation_weights` must be nonnegative.")
     }
+  }
+
+  # A degenerate clever covariate cannot identify a fluctuation direction.
+  if (all(clever_covariate == 0)) {
+    warning("Clever covariate is identically zero; no fluctuation applied ",
+            "(eps set to 0).")
+    return(list(eps = 0, intercept = 0, updated = offset, fit = NULL))
+  }
+
+  finish <- function(fit, updated_fun) {
+    coefs <- stats::coef(fit)
+    eps <- unname(coefs["H"])
+    if (!is.finite(eps)) {
+      warning("Fluctuation coefficient is not finite (NA/NaN/Inf); ",
+              "no fluctuation applied (eps set to 0). This usually ",
+              "indicates a degenerate clever covariate or separation.")
+      eps <- 0
+    }
+    list(eps = eps, intercept = 0, updated = updated_fun(eps), fit = fit)
   }
 
   if (fluctuation_type == "identity") {
@@ -155,18 +213,8 @@ riesz_tmle <- function(data,
       offset = offset,
       weights = fluctuation_weights
     )
-    coefs <- stats::coef(fit)
-    intercept <- 0
-    eps <- unname(coefs["H"])
 
-    updated <- offset + intercept + eps * clever_covariate
-
-    return(list(
-      eps = eps,
-      intercept = intercept,
-      updated = updated,
-      fit = fit
-    ))
+    return(finish(fit, function(eps) offset + eps * clever_covariate))
   }
 
   if (fluctuation_type == "logistic") {
@@ -188,20 +236,11 @@ riesz_tmle <- function(data,
       weights = fluctuation_weights
     ))
 
-    coefs <- stats::coef(fit)
-    eps <- unname(coefs["H"])
-    intercept <- 0
-
-    updated01 <- expit(offset_logit + intercept + eps * clever_covariate)
-    updated01 <- clip01(updated01, clip = clip)
-    updated <- from01(updated01, bounds)
-
-    return(list(
-      eps = eps,
-      intercept = intercept,
-      updated = updated,
-      fit = fit
-    ))
+    return(finish(fit, function(eps) {
+      updated01 <- expit(offset_logit + eps * clever_covariate)
+      updated01 <- clip01(updated01, clip = clip)
+      from01(updated01, bounds)
+    }))
   }
 
   stop("Unsupported fluctuation_type.")
@@ -229,6 +268,22 @@ riesz_tmle <- function(data,
     ci_high = ci_high,
     n = n
   )
+}
+
+.check_targeted_score <- function(ic_star, estimate, se, score_tol) {
+  # After a successful TMLE update, mean(ic_star) == estimate up to
+  # numerical error (each fluctuation solves its score equation exactly).
+  score <- mean(ic_star) - estimate
+  if (is.finite(se) && se > 0 && abs(score) > score_tol * se) {
+    warning(
+      "The targeted EIF estimating equation is not (numerically) solved: ",
+      "mean(targeted IC) - estimate = ", formatC(score, digits = 4, format = "g"),
+      " (", formatC(abs(score) / se, digits = 3, format = "f"),
+      " estimated standard errors). ",
+      "Check `targeting_steps` / `alpha_star` specifications and bounds."
+    )
+  }
+  invisible(score)
 }
 
 .apply_fluctuation_map <- function(x,
@@ -266,7 +321,8 @@ riesz_tmle <- function(data,
                                outcome_col,
                                fluctuation_weights,
                                clip,
-                               significance_alpha) {
+                               significance_alpha,
+                               score_tol) {
 
   y <- data[[outcome_col]]
   rc$fit(data)
@@ -275,8 +331,7 @@ riesz_tmle <- function(data,
   h <- rc$fit_h
   alpha <- rc$fit_alpha
 
-
-  # untargeted procedure for EIF --------------------------------------------------------------
+  # ---- untargeted quantities used for inference ----------------------------
 
   # Untargeted plug-in
   psi_init <- mean(h)
@@ -287,11 +342,7 @@ riesz_tmle <- function(data,
   # Centered EIF for variance
   eif_init <- ic_init - psi_init
 
-  # targeted procedure for estimate -----------------------------------------
-
-  alpha <- rc$fit_alpha
-  h <- rc$fit_h
-  f <- rc$fit_f
+  # ---- targeted procedure for the point estimate ---------------------------
 
   fluc_fit <- .fit_tmle_fluctuation(
     target = y,
@@ -313,17 +364,32 @@ riesz_tmle <- function(data,
     clip = clip
   )
 
-  alpha_star <- rc$eval_alpha(data, nuis_star)
   f_star <- rc$eval_f(data, nuis_star)
   h_star <- rc$eval_h(data, nuis_star, f_value = f_star)
 
   tmle_estimate <- mean(h_star)
+
+  # Targeted influence curve; its empirical mean should equal the TMLE
+  # estimate (up to numerical error) when the targeting step succeeded.
+  ic_star <- NULL
+  if (!is.null(rc$ic_expr)) {
+    alpha_at_star <- rc$eval_alpha(data, nuis_star)
+    ic_star <- unname(rc$eval_ic(
+      data, nuis_star,
+      alpha = alpha_at_star, f = f_star, h = h_star
+    ))
+  }
 
   summarized_tmle_fit <- .summarize_tmle_fit(
     estimate = tmle_estimate,
     ic_for_inference = eif_init,
     significance_alpha = significance_alpha
   )
+
+  if (!is.null(ic_star)) {
+    .check_targeted_score(ic_star, tmle_estimate,
+                          summarized_tmle_fit$se, score_tol)
+  }
 
   RieszFit$new(
     estimate = summarized_tmle_fit$estimate,
@@ -335,6 +401,7 @@ riesz_tmle <- function(data,
     estimator = "TMLE",
     n = summarized_tmle_fit$n,
     ic = eif_init,
+    ic_star = ic_star,
     eps = fluc_fit$eps,
     intercept = fluc_fit$intercept,
     f_star = f_star,
@@ -350,7 +417,8 @@ riesz_tmle <- function(data,
                                  outcome_col,
                                  fluctuation_weights,
                                  clip,
-                                 significance_alpha) {
+                                 significance_alpha,
+                                 score_tol) {
 
   y <- data[[outcome_col]]
   n <- nrow(data)
@@ -359,11 +427,9 @@ riesz_tmle <- function(data,
   J <- length(rc$rc_list)
 
   alpha_list <- vector("list", J)
+  alpha_star_list <- vector("list", J)
   f_list <- vector("list", J)
   h_list <- vector("list", J)
-  omega_list <- vector("list", J)
-
-  omega_running <- rep(1, n)
 
   for (j in seq_len(J)) {
     rj <- rc$rc_list[[j]]
@@ -371,10 +437,42 @@ riesz_tmle <- function(data,
     f_list[[j]] <- rj$fit_f
     h_list[[j]] <- rj$fit_h
 
-    omega_running <- omega_running * alpha_list[[j]]
-    omega_list[[j]] <- omega_running
+    a_star <- rj$fit_alpha_star
+    if (is.null(a_star)) {
+      warning(
+        "Stage ", j, " has no `alpha_star`. Falling back to the ",
+        "observed-data `alpha` to update its predictions in the plug-in; ",
+        "this is NOT a valid TMLE update in general, because units off ",
+        "the support of the intervention (or unobserved units) receive no ",
+        "update. Supply `alpha_star` on every stage (e.g. `~ 1/g` for ",
+        "indicator weights, `~ 1/pi` for missingness weights)."
+      )
+      a_star <- alpha_list[[j]]
+    }
+    alpha_star_list[[j]] <- a_star
   }
 
+  # ---- cumulative products of representers (suffix products) ---------------
+  # omega_j = prod_{k = j}^{J} alpha_k       : clever covariate for the
+  #                                            fluctuation of stage j's f
+  # omega_star_j = prod_{k = j}^{J} alpha*_k : clever covariate for the
+  #                                            counterfactual update of
+  #                                            stage j's h (all treatments
+  #                                            from the first time point
+  #                                            through stage j's time point
+  #                                            are set when h_j is evaluated)
+  omega_list <- vector("list", J)
+  omega_star_list <- vector("list", J)
+  running <- rep(1, n)
+  running_star <- rep(1, n)
+  for (j in rev(seq_len(J))) {
+    running <- running * alpha_list[[j]]
+    running_star <- running_star * alpha_star_list[[j]]
+    omega_list[[j]] <- running
+    omega_star_list[[j]] <- running_star
+  }
+
+  # ---- sequential fluctuations, innermost-first -----------------------------
   target_list <- vector("list", J)
   f_star_list <- vector("list", J)
   h_star_list <- vector("list", J)
@@ -402,9 +500,12 @@ riesz_tmle <- function(data,
     intercept_vec[[j]] <- fluc$intercept
     fluctuation_models[[j]] <- fluc$fit
 
+    # Counterfactual predictions are updated with the INTERVENED clever
+    # covariate (omega_star), not the observed one: h_j is the evaluation of
+    # the fluctuated regression f*_j under the intervention.
     h_star_list[[j]] <- .apply_fluctuation_map(
       x = h_list[[j]],
-      clever_covariate = omega_list[[j]],
+      clever_covariate = omega_star_list[[j]],
       eps = fluc$eps,
       intercept = fluc$intercept,
       fluctuation_type = fluctuation_type,
@@ -424,7 +525,6 @@ riesz_tmle <- function(data,
     h_list = h_list
   )
   ic_for_inference <- untargeted_ic$ic
-  plugin_estimate <- untargeted_ic$psi
 
   targeted_ic <- .compute_targeted_ic_composed(
     y = y,
@@ -439,6 +539,9 @@ riesz_tmle <- function(data,
     significance_alpha = significance_alpha
   )
 
+  .check_targeted_score(targeted_ic, tmle_estimate,
+                        summarized_tmle_fit$se, score_tol)
+
   RieszFit$new(
     estimate = summarized_tmle_fit$estimate,
     var = summarized_tmle_fit$var,
@@ -450,7 +553,7 @@ riesz_tmle <- function(data,
     n = summarized_tmle_fit$n,
     eps = eps_vec,
     intercept = intercept_vec,
-    ic = ic_for_inference,
+    ic = ic_for_inference - untargeted_ic$psi,
     ic_star = targeted_ic,
     f_star = f_star_list,
     h_star = h_star_list,
@@ -522,25 +625,52 @@ riesz_tmle <- function(data,
 # produce targeted nuisances ----------------------------------------------
 
 .build_targeted_nuisance_list <- function(rc, data, eps, intercept,
-                              fluctuation_type, bounds, clip) {
+                                          fluctuation_type, bounds, clip) {
   nuis_star <- rc$fit_nuis
 
   if (is.null(rc$targeting_steps)) {
-    stop("`rc$targeting_steps` must be specified for TMLE.")
+    stop("`rc$targeting_steps` must be specified for TMLE. For each nuisance ",
+         "appearing in `f` or `h`, provide `list()` (updated with the ",
+         "observed-data `alpha`), `list(alpha_star = ~ ...)` (updated with ",
+         "an explicit counterfactual clever covariate), or ",
+         "`list(set = list(...))` (updated with `alpha` re-evaluated on ",
+         "intervened data).")
   }
 
   for (nm in names(rc$targeting_steps)) {
-    spec <- rc$targeting_steps[[nm]]
-    data_fluc <- .apply_intervention_values(data, spec$set)
+    if (!nm %in% names(nuis_star)) {
+      stop("`targeting_steps` refers to nuisance `", nm,
+           "`, which is not in the fitted nuisance list.")
+    }
 
-    H_nm <- rc$eval_alpha(data_fluc, rc$fit_nuis)
+    spec <- rc$targeting_steps[[nm]]
+
+    if (!is.null(spec$alpha_star)) {
+      # explicit counterfactual clever covariate for this nuisance
+      if (is.numeric(spec$alpha_star)) {
+        H_nm <- spec$alpha_star
+      } else {
+        H_nm <- rc$.eval_formula(spec$alpha_star, data, rc$fit_nuis)
+      }
+    } else if (!is.null(spec$set)) {
+      # legacy mechanism: re-evaluate alpha on intervened data. Only valid
+      # when `alpha` depends on the intervened columns directly.
+      data_fluc <- .apply_intervention_values(data, spec$set)
+      H_nm <- rc$eval_alpha(data_fluc, rc$fit_nuis)
+    } else {
+      # empty spec: update with the observed-data representer
+      H_nm <- rc$fit_alpha
+    }
+
+    if (length(H_nm) == 1L) H_nm <- rep(H_nm, length(nuis_star[[nm]]))
+    H_nm <- as.vector(unname(H_nm))
 
     nuis_star[[nm]] <- .apply_fluctuation_map(
       x = rc$fit_nuis[[nm]],
       clever_covariate = H_nm,
       eps = eps,
       intercept = intercept,
-      fluctuation = fluctuation_type,
+      fluctuation_type = fluctuation_type,
       bounds = bounds,
       clip = clip
     )
@@ -548,7 +678,3 @@ riesz_tmle <- function(data,
 
   nuis_star
 }
-
-
-
-
