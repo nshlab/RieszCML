@@ -34,7 +34,7 @@ Software written by [Christian Testa](https://ctesta.com),
 
 The `RieszCML` R package provides a unified framework for constructing
 asymptotically efficient, doubly-robust estimators — both one-step and
-targeted minimum loss-based estimators (TMLE) — of statistical functionals
+targeted maximum likelihood-based estimators (TMLE) — of statistical functionals
 whose efficient influence function (EIF) can be expressed in terms of a
 *Riesz representer* [@balkus2026riesz; @chernozhukov2022automatic; @hirshberg2021augmented].
 This class of functionals encompasses a wide range of estimands from causal
@@ -157,7 +157,7 @@ is then a single function call:
 riesz_estimate(data = df, rc = rc_ate)
 ```
 
-Alternatively, `riesz_tmle()` constructs a targeted minimum loss-based
+Alternatively, `riesz_tmle()` constructs a targeted maximum likelihood
 estimator by fluctuating the initial regression fit using the Riesz
 representer as a "clever covariate":
 
@@ -179,6 +179,86 @@ prepending one further stage. See the package vignettes for worked examples
 covering longitudinal treatment regimes, missing outcomes, subgroup average
 derivative effects, delta-method contrasts, and super learning with
 cross-fitting.
+
+---
+
+
+## More reading
+
+- [*A Riesz representer perspective on targeted
+  learning*](https://arxiv.org/abs/2604.21721) (Balkus, Testa, and Hejazi, 2026) - The companion paper to this package, deriving the sequential "Riesz EIF" for
+  nested linear functionals and the TMLE algorithms implemented in `RieszCML`.
+  
+- [*Automatic debiased machine learning for dynamic treatment effects
+  and general nested functionals*](https://arxiv.org/abs/2203.13887)
+  (Chernozhukov, Newey, Singh, and Syrgkanis, 2022, updated 2026) - Extends automatic
+  debiasing to the dynamic treatment regime, showing the multiply robust
+  formula for nested mean regressions admits a recursive Riesz representer
+  characterization; each representer is estimated by a sequential Riesz
+  loss, avoiding analytic derivation of inverse-propensity products, with
+  extensions to nested nonlinear/IV functionals and long-term effects with
+  surrogates.
+
+- [*Riesz representers for the rest of
+  us*](https://arxiv.org/abs/2507.19413) (Williams, Hines, and Rudolph, 2025) -
+  A gentle, worked-example introduction to the Riesz representation
+  theorem for epidemiologists, including a simple recursive algorithm for
+  deriving EIFs of estimands built from iterated conditional expectations.
+  
+
+- [*Learning density ratios in causal inference using Bregman-Riesz
+  regression*](https://arxiv.org/abs/2510.16127) (Hines and Miles, 2025) -
+  Connects Riesz regression to density ratio estimation under Bregman
+  divergences, of interest when Riesz representers take the form of
+  density or probability ratios.
+
+- [*Two approaches to direct estimation of Riesz
+  representers*](https://arxiv.org/abs/2603.20936) (Bruns-Smith, 2026) -
+  Relates the "Riesz loss" of the automatic debiased machine learning
+  literature to an older sieve-based formulation from conditional moment
+  models, showing when the two direct estimation strategies coincide.
+
+- [*General targeted machine learning for modern causal mediation
+  analysis*](https://arxiv.org/abs/2408.14620) (Liu, Williams, Rudolph,
+  and Díaz, 2024) - A one-step estimation framework covering six families
+  of mediation estimands via sequential regressions and sequential Riesz
+  learning, implemented in the
+  [`crumble`](https://cran.r-project.org/package=crumble) R package.
+
+- [*Automatic debiased machine learning via Riesz
+  regression*](https://www.econometricsociety.org/event_papers/download/270/568/1/t2024emes.pdf)
+  (Chernozhukov, Newey, Quintas-Martínez, and Syrgkanis; Econometric
+  Society lecture) - The foundational proposal for estimating Riesz
+  representers directly via empirical risk minimization of a tailored
+  "Riesz loss", bypassing estimation of constituent nuisance components
+  such as propensity scores.
+
+- [*Riesz representer fitting under Bregman divergence: a unified
+  framework for debiased machine
+  learning*](https://arxiv.org/abs/2601.07752) (Kato, 2026) - A
+  generalized Riesz regression framework encompassing the squared-error
+  Riesz loss, tailored loss minimization, and covariate balancing as
+  special cases, with an accompanying [Python
+  package](https://github.com/MasaKat0/genriesz).
+
+---
+
+## Description of our Logo 
+
+<img src='man/figures/logo.png' align='right' height='400' alt='RieszCML logo' />
+
+The [Riesz representation theorem](https://en.wikipedia.org/wiki/Riesz_representation_theorem#Statement) tells us that every bounded linear functional
+in a Hilbert space can be represented as an inner product with an 
+element $\alpha$ (particular to that functional) called the Riesz representer. Hilbert spaces can be thought
+of as spaces of functionals with a geometry reminiscent of Euclidean
+geometry, including the concept of **orthogonal projection**. 
+
+Since our article describes the construction of nested sequential one-step and 
+targeted maximum likelihood estimators based on using Riesz representers, our logo reflects this **recursive** 
+orthogonal projection structure. 
+
+Additionally, for fun, in the corner there is an important equation in the 
+upper left hand corner.
 
 ---
 
@@ -225,57 +305,6 @@ After using the `RieszCML` R package, please cite the following:
 
 ---
 
-## More reading
-
-- [*A Riesz representer perspective on targeted
-  learning*](https://arxiv.org/abs/2604.21721) (Balkus, Testa, and Hejazi, 2026) - The companion paper to this package, deriving the sequential "Riesz EIF" for
-  nested linear functionals and the TMLE algorithms implemented in `RieszCML`.
-
-- [*Riesz representers for the rest of
-  us*](https://arxiv.org/abs/2507.19413) (Williams, Hines, and Rudolph, 2025) -
-  A gentle, worked-example introduction to the Riesz representation
-  theorem for epidemiologists, including a simple recursive algorithm for
-  deriving EIFs of estimands built from iterated conditional expectations.
-
-- [*Learning density ratios in causal inference using Bregman-Riesz
-  regression*](https://arxiv.org/abs/2510.16127) (Hines and Miles, 2025) -
-  Connects Riesz regression to density ratio estimation under Bregman
-  divergences, of interest when Riesz representers take the form of
-  density or probability ratios.
-
-- [*Two approaches to direct estimation of Riesz
-  representers*](https://arxiv.org/abs/2603.20936) (Bruns-Smith, 2026) -
-  Relates the "Riesz loss" of the automatic debiased machine learning
-  literature to an older sieve-based formulation from conditional moment
-  models, showing when the two direct estimation strategies coincide.
-
-- [*General targeted machine learning for modern causal mediation
-  analysis*](https://arxiv.org/abs/2408.14620) (Liu, Williams, Rudolph,
-  and Díaz, 2024) - A one-step estimation framework covering six families
-  of mediation estimands via sequential regressions and sequential Riesz
-  learning, implemented in the
-  [`crumble`](https://cran.r-project.org/package=crumble) R package.
-
-- [*Automatic debiased machine learning via Riesz
-  regression*](https://www.econometricsociety.org/event_papers/download/270/568/1/t2024emes.pdf)
-  (Chernozhukov, Newey, Quintas-Martínez, and Syrgkanis; Econometric
-  Society lecture) - The foundational proposal for estimating Riesz
-  representers directly via empirical risk minimization of a tailored
-  "Riesz loss", bypassing estimation of constituent nuisance components
-  such as propensity scores.
-
-- [*Riesz representer fitting under Bregman divergence: a unified
-  framework for debiased machine
-  learning*](https://arxiv.org/abs/2601.07752) (Kato, 2026) - A
-  generalized Riesz regression framework encompassing the squared-error
-  Riesz loss, tailored loss minimization, and covariate balancing as
-  special cases, with an accompanying [Python
-  package](https://github.com/MasaKat0/genriesz).
-
----
-
----
-
 ## Funding
 
 The development of this software was supported in part by a grant from the
@@ -286,7 +315,7 @@ National Science Foundation (award no.
 
 ## License
 
-&copy; 2025-2026  Christian Testa, Salvador V. Balkus, Nima S. Hejazi
+&copy; 2026  Christian Testa, Salvador V. Balkus, Nima S. Hejazi
 
 The contents of this repository are distributed under the MIT license. See
 file `LICENSE.md` for details.

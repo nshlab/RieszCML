@@ -25,7 +25,7 @@ Hejazi](https://nimahejazi.org).
 
 The `RieszCML` R package provides a unified framework for constructing
 asymptotically efficient, doubly-robust estimators — both one-step and
-targeted minimum loss-based estimators (TMLE) — of statistical
+targeted maximum likelihood-based estimators (TMLE) — of statistical
 functionals whose efficient influence function (EIF) can be expressed in
 terms of a *Riesz representer* (Balkus, Testa, and Hejazi 2026;
 Chernozhukov, Newey, and Singh 2022; Hirshberg and Wager 2021). This
@@ -161,7 +161,7 @@ riesz_estimate(data = df, rc = rc_ate)
 #> Stored internals: ic
 ```
 
-Alternatively, `riesz_tmle()` constructs a targeted minimum loss-based
+Alternatively, `riesz_tmle()` constructs a targeted maximum likelihood
 estimator by fluctuating the initial regression fit using the Riesz
 representer as a “clever covariate”:
 
@@ -182,7 +182,7 @@ riesz_tmle(
 #> 
 #> Fluctuation epsilon: 0.00038
 #> 
-#> Stored internals: ic, f_star, h_star, fluctuation_model
+#> Stored internals: ic, ic_star, f_star, h_star, fluctuation_model
 ```
 
 More involved estimands are constructed compositionally. For example,
@@ -197,46 +197,6 @@ contrasts, and super learning with cross-fitting.
 
 ------------------------------------------------------------------------
 
-## Issues
-
-If you encounter any bugs or have any specific feature requests, please
-[file an issue](https://github.com/nshlab/RieszCML/issues).
-
-------------------------------------------------------------------------
-
-<!--- 
-## Contributions
-&#10;Contributions are very welcome. Interested contributors should consult our
-[contribution guidelines](https://github.com/nshlab/RieszCML/blob/main/CONTRIBUTING.md)
-prior to submitting a pull request.
-&#10;---
---->
-
-## Citation
-
-After using the `RieszCML` R package, please cite the following:
-
-    @article{balkus2026riesz,
-      author = {Balkus, Salvador V and Testa, Christian and Hejazi,
-        Nima S},
-      title = {A {Riesz} Representer Perspective on Targeted Learning},
-      year = {2026},
-      journal = {arXiv preprint arXiv:2604.21721},
-      url = {https://arxiv.org/abs/2604.21721}
-    }
-
-    @software{balkus2026rieszcml-rpkg,
-      author = {Testa, Christian, Balkus, Salvador V and Hejazi,
-        Nima S},
-      title = {{RieszCML}: {Riesz} Representers for Causal Machine
-        learning},
-      year = {2026},
-      url = {https://github.com/nshlab/RieszCML},
-      note = {R package}
-    }
-
-------------------------------------------------------------------------
-
 ## More reading
 
 - [*A Riesz representer perspective on targeted
@@ -244,6 +204,16 @@ After using the `RieszCML` R package, please cite the following:
   Hejazi, 2026) - The companion paper to this package, deriving the
   sequential “Riesz EIF” for nested linear functionals and the TMLE
   algorithms implemented in `RieszCML`.
+
+- [*Automatic debiased machine learning for dynamic treatment effects
+  and general nested functionals*](https://arxiv.org/abs/2203.13887)
+  (Chernozhukov, Newey, Singh, and Syrgkanis, 2022, updated 2026) -
+  Extends automatic debiasing to the dynamic treatment regime, showing
+  the multiply robust formula for nested mean regressions admits a
+  recursive Riesz representer characterization; each representer is
+  estimated by a sequential Riesz loss, avoiding analytic derivation of
+  inverse-propensity products, with extensions to nested nonlinear/IV
+  functionals and long-term effects with surrogates.
 
 - [*Riesz representers for the rest of
   us*](https://arxiv.org/abs/2507.19413) (Williams, Hines, and
@@ -289,6 +259,66 @@ After using the `RieszCML` R package, please cite the following:
 
 ------------------------------------------------------------------------
 
+## Description of our Logo
+
+<img src='man/figures/logo.png' align='right' height='400' alt='RieszCML logo' />
+
+The [Riesz representation
+theorem](https://en.wikipedia.org/wiki/Riesz_representation_theorem#Statement)
+tells us that every bounded linear functional in a Hilbert space can be
+represented as an inner product with an element $\alpha$ (particular to
+that functional) called the Riesz representer. Hilbert spaces can be
+thought of as spaces of functionals with a geometry reminiscent of
+Euclidean geometry, including the concept of **orthogonal projection**.
+
+Since our article describes the construction of nested sequential
+one-step and targeted maximum likelihood estimators based on using Riesz
+representers, our logo reflects this **recursive** orthogonal projection
+structure.
+
+Additionally, for fun, in the corner there is an important equation in
+the upper left hand corner.
+
+------------------------------------------------------------------------
+
+## Issues
+
+If you encounter any bugs or have any specific feature requests, please
+[file an issue](https://github.com/nshlab/RieszCML/issues).
+
+------------------------------------------------------------------------
+
+<!--- 
+## Contributions
+&#10;Contributions are very welcome. Interested contributors should consult our
+[contribution guidelines](https://github.com/nshlab/RieszCML/blob/main/CONTRIBUTING.md)
+prior to submitting a pull request.
+&#10;---
+--->
+
+## Citation
+
+After using the `RieszCML` R package, please cite the following:
+
+    @article{balkus2026riesz,
+      author = {Balkus, Salvador V and Testa, Christian and Hejazi,
+        Nima S},
+      title = {A {Riesz} Representer Perspective on Targeted Learning},
+      year = {2026},
+      journal = {arXiv preprint arXiv:2604.21721},
+      url = {https://arxiv.org/abs/2604.21721}
+    }
+
+    @software{balkus2026rieszcml-rpkg,
+      author = {Testa, Christian, Balkus, Salvador V and Hejazi,
+        Nima S},
+      title = {{RieszCML}: {Riesz} Representers for Causal Machine
+        learning},
+      year = {2026},
+      url = {https://github.com/nshlab/RieszCML},
+      note = {R package}
+    }
+
 ------------------------------------------------------------------------
 
 ## Funding
@@ -301,7 +331,7 @@ the National Science Foundation (award no. [DGE
 
 ## License
 
-© 2025-2026 Christian Testa, Salvador V. Balkus, Nima S. Hejazi
+© 2026 Christian Testa, Salvador V. Balkus, Nima S. Hejazi
 
 The contents of this repository are distributed under the MIT license.
 See file `LICENSE.md` for details.
