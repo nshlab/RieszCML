@@ -1,3 +1,4 @@
+
 test_that("RieszCurve initialize errors for unnamed nuisance list", {
   expect_error(
     RieszCurve$new(
@@ -6,7 +7,7 @@ test_that("RieszCurve initialize errors for unnamed nuisance list", {
       f = ~ Y,
       h = ~ Y
     ),
-    "if nuis is a list it must be named."
+    "if `nuis` is a list it must be fully named"
   )
 })
 
@@ -18,7 +19,7 @@ test_that("RieszCurve initialize errors if nuis is neither list nor function", {
       f = ~ Y,
       h = ~ Y
     ),
-    "must be either a named list or function"
+    "must be either a named list or a function"
   )
 })
 
@@ -171,3 +172,4 @@ test_that("RieszCurve fit_ic is unnamed", {
   rc$fit(df)
   expect_null(names(rc$fit_ic))
 })
+

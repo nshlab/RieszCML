@@ -1,3 +1,4 @@
+
 test_that("riesz_tmle errors for invalid rc input", {
   df <- data.frame(Y = 1:3, A = c(1, 0, 1))
   expect_error(
@@ -125,7 +126,7 @@ test_that("single-stage logistic riesz_tmle returns expected structure", {
     f = ~ m,
     h = ~ ma,
     ic_expr = ~ h + alpha * (Y - f),
-    targeting_steps = list(m = list(), ma = list(A = 1))
+    targeting_steps = list(m = list(), ma = list(set = list(A = 1)))
   )
 
   out <- riesz_tmle(
@@ -160,7 +161,7 @@ test_that("single-stage logistic riesz_tmle keeps f_star within bounds", {
     f = ~ m,
     h = ~ ma,
     ic_expr = ~ h + alpha * (Y - f),
-    targeting_steps = list(m = list(), ma = list(A = 1))
+    targeting_steps = list(m = list(), ma = list(set = list(A = 1)))
   )
 
   out <- riesz_tmle(
@@ -191,7 +192,7 @@ test_that("single-stage logistic riesz_tmle has near-zero epsilon when Y equals 
     f = ~ m,
     h = ~ ma,
     ic_expr = ~ h + alpha * (Y - f),
-    targeting_steps = list(m = list(), ma = list(A = 1))
+    targeting_steps = list(m = list(), ma = list(set = list(A = 1)))
   )
 
   out <- riesz_tmle(
@@ -288,3 +289,4 @@ test_that("single-stage logistic riesz_tmle is close to truth for bounded counte
 
   expect_equal(out$estimate, truth, tolerance = 0.05)
 })
+
