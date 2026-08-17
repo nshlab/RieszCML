@@ -455,21 +455,30 @@ riesz_tmle <- function(data,
   # ---- cumulative products of representers (suffix products) ---------------
   # omega_j = prod_{k = j}^{J} alpha_k       : clever covariate for the
   #                                            fluctuation of stage j's f
-  # omega_star_j = prod_{k = j}^{J} alpha*_k : clever covariate for the
+  # omega_star_j = alpha*_j * prod_{k>j} alpha_k : clever covariate for the
   #                                            counterfactual update of
-  #                                            stage j's h (all treatments
-  #                                            from the first time point
-  #                                            through stage j's time point
-  #                                            are set when h_j is evaluated)
+  #                                            stage j's h (only stage j's
+  #                                            own treatment is set when
+  #                                            h_j is evaluated; earlier
+  #                                            time points stay natural)
   omega_list <- vector("list", J)
   omega_star_list <- vector("list", J)
   running <- rep(1, n)
-  running_star <- rep(1, n)
   for (j in rev(seq_len(J))) {
+    # h_j evaluates stage j's fluctuated regression with ONLY stage j's
+    # treatment intervened (the package's stagewise convention: see the
+    # ComposedRieszCurve examples and Diaz et al. 2021's lmtp recursion,
+    # where each pseudo-outcome shifts the current treatment only). The
+    # clever covariate of that evaluation is therefore alpha*_j times the
+    # NATURAL-value representers of the later stages (earlier time points),
+    #   omega^d_j = alpha*_j * prod_{k > j} alpha_k,
+    # not prod_{k >= j} alpha*_k. For indicator representers the two
+    # coincide (1(A=a)^2 = 1(A=a) = 1(A=a) * 1), which is why binary tests
+    # cannot tell them apart; for density-ratio representers (MTP stages)
+    # the all-starred product breaks double robustness.
+    omega_star_list[[j]] <- alpha_star_list[[j]] * running
     running <- running * alpha_list[[j]]
-    running_star <- running_star * alpha_star_list[[j]]
     omega_list[[j]] <- running
-    omega_star_list[[j]] <- running_star
   }
 
   # ---- sequential fluctuations, innermost-first -----------------------------
