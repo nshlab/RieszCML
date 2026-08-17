@@ -11,6 +11,8 @@
 progress.](https://www.repostatus.org/badges/latest/wip.svg)](https://www.repostatus.org/#wip)
 [![MIT
 license](https://img.shields.io/badge/license-MIT-brightgreen.svg)](https://opensource.org/licenses/MIT)
+<!-- [![Codecov test coverage](https://codecov.io/gh/nshlab/RieszCML/graph/badge.svg)](https://app.codecov.io/gh/nshlab/RieszCML) -->
+[![R-CMD-check](https://github.com/nshlab/RieszCML/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/nshlab/RieszCML/actions/workflows/R-CMD-check.yaml)
 <!-- badges: end -->
 
 > Riesz Representers for Causal Machine Learning
