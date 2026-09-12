@@ -1,0 +1,946 @@
+---
+title: "Getting Started with RieszCML: Riesz-Representer-Based Estimation from First Principles"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 3
+vignette: >
+  %\VignetteIndexEntry{Getting Started with RieszCML}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library(RieszCML)
+```
+
+`{RieszCML}` constructs asymptotically efficient, doubly robust estimators —
+one-step estimators and targeted minimum loss-based estimators (TMLEs) — for
+any statistical parameter that can be written as a **linear functional of one
+or more nuisance functions**. This covers a remarkable share of the estimands
+used in causal inference and missing-data problems: counterfactual means,
+average treatment effects (ATE), effects among the treated (ATT), controlled
+direct effects (CDE), modified treatment policies (MTPs), longitudinal
+treatment regimes (including LMTPs), subgroup effects, average derivative
+effects, and parameters corrected for outcome missingness or two-phase
+sampling.
+
+The package is in part a menu of estimands. However, it also gives you an
+algebra of building blocks for constructing efficient estimators:
+
+* `RieszCurve` — a declarative description of one linear functional: its
+  nuisance functions, its Riesz representer, and its efficient influence
+  function (EIF);
+* `ComposedRieszCurve` — a chain of `RieszCurve`s for *nested* functionals
+  (sequential regressions, as in longitudinal problems and mediation-style
+  parameters);
+* `riesz_estimate()` — the one-step (de-biased plug-in) estimator;
+* `riesz_tmle()` — the TMLE, a substitution estimator that fluctuates the
+  fitted regressions until the EIF estimating equation is solved;
+* `riesz_delta_*()` — delta-method combinators for contrasts, ratios, and
+  odds ratios of fitted linear functionals;
+* `riesz_curve_catalog` — pre-specified curves for common estimands, which
+  double as worked examples of the interface.
+
+The goal of this vignette is that, by the end, users can Riesz-represent an
+estimand they care about, as opposed to being restricted to what's in the catalog, 
+and implement a correct one-step estimator and TMLE for it themselves. To get
+there we first need about two pages of theory, because each argument of
+`RieszCurve$new()` corresponds to an object in that theory.
+
+## 1. The theory in two pages
+
+### 1.1 Linear functionals and Riesz representers
+
+Suppose we observe $n$ i.i.d. copies of $O \sim P_0$ and want to estimate a
+parameter of the form
+
+$$
+\psi_0 \;=\; \Psi(\eta_0) \;=\; E_{P_0}\!\left[\, h(O;\, \eta_0) \,\right],
+$$
+
+where $\eta_0$ is a *nuisance function* (usually a regression, e.g.
+$m_0(A, L) = E[Y \mid A, L]$) and $h$ is a fixed transformation of it that is
+**linear** in $\eta$. The prototypical example is the counterfactual mean
+under treatment,
+
+$$
+\psi_0 = E\big[\, m_0(1, L) \,\big],
+\qquad
+h(O; m) = m(1, L),
+$$
+
+where $h$ is "evaluate the regression at $A = 1$" — a linear operation.
+
+Because $\Psi$ is a bounded linear functional of $\eta$, the Riesz
+representation theorem guarantees a unique function $\alpha_0$ — the **Riesz
+representer** — such that
+
+$$
+\Psi(\eta) = E_{P_0}\big[\, \alpha_0(X)\, \eta(X) \,\big]
+\quad \text{for every } \eta,
+$$
+
+where $X$ denotes the arguments of $\eta$. The representer is a
+change-of-measure object: whenever the parameter integrates $\eta$ against a
+distribution $P^\star$ that one cannot sample from (a counterfactual world, the
+full-data distribution behind a missingness process, a shifted exposure
+distribution), $\alpha_0 = dP^\star / dP_0$ is the Radon–Nikodym derivative
+that re-expresses that integral under the observed-data distribution. This is
+why every representer looks like a weight:
+
+| Parameter | $h(O; \eta)$ | Riesz representer $\alpha(O)$ |
+|---|---|---|
+| Counterfactual mean $E[m_0(a, L)]$ | $m(a, L)$ | $\mathbb{1}(A = a)\,/\,P(A = a \mid L)$ |
+| ATE | $m(1,L) - m(0,L)$ | $A/g(L) - (1-A)/(1-g(L))$ |
+| ATT numerator $E[A\{Y - m_0(0,L)\}]$ | $A\{Y - m(0,L)\}$ | $-(1-A)\,g(L)/(1-g(L))$ |
+| Mean with MAR outcome $E[E(Y \mid R=1, V)]$ | $m(V)$ | $R\,/\,\pi(V)$ |
+| Additive-shift MTP $E[m_0(A + \delta, L)]$ | $m(A + \delta, L)$ | $g(A - \delta \mid L)\,/\,g(A \mid L)$ |
+| Subgroup mean $E[Y \mid V = v]$ | $m(v)$ | $\mathbb{1}(V = v)\,/\,P(V = v)$ |
+| Sequential regime (per step $t$) | $Q_t$ evaluated under regime | product of per-step representers |
+
+### 1.2 Why the representer de-biases
+
+Fit $\eta_n$ with your favorite (possibly machine-learning) regression and
+plug it in. Linearity gives the exact bias identity
+
+$$
+\Psi(\eta_n) - \Psi(\eta_0) = \Psi(\eta_n - \eta_0)
+= E\big[\alpha_0\,(\eta_n - \eta_0)\big],
+$$
+
+so the first-order bias of the plug-in is *known up to $\alpha_0$*, and the
+corrected estimator $\Psi(\eta_n) + E_n[\alpha_n\,(Y - \eta_n)]$ (the
+**one-step estimator**) has only the second-order remainder
+
+$$
+E\big[(\alpha_0 - \alpha_n)(\eta_0 - \eta_n)\big],
+$$
+
+which vanishes if *either* nuisance is consistent (model double robustness)
+or if the product of their convergence rates beats $n^{-1/2}$ (rate double
+robustness). Concretely, the estimators in this package remain consistent if
+you get the outcome regressions right but the weights wrong, or vice versa.
+
+### 1.3 The efficient influence function
+
+For a linear functional whose nuisance is a conditional mean
+$m(X) = E[Y \mid X]$, these pieces assemble into the (uncentered) efficient
+influence function
+
+$$
+\phi(O) \;=\; \underbrace{h(O;\, m)}_{\text{plug-in}} \;+\;
+\underbrace{\alpha(X)\,\big(Y - m(X)\big)}_{\text{de-biasing term}},
+$$
+
+with $E[\phi] = \psi_0$. Every estimator in `{RieszCML}` is organized around
+this expression, and the arguments of `RieszCurve$new()` are precisely its
+components:
+
+| Math object | `RieszCurve` argument | Example (counterfactual mean, $a=1$) |
+|---|---|---|
+| nuisance estimates $\eta_n$ | `nuis` | function returning `m`, `ma`, `g` |
+| $\alpha(X)$ at observed data | `alpha` | `~ I(A == 1) / g` |
+| $m(X)$ at observed data | `f` | `~ m` |
+| $h(O; \eta)$ (under the intervention) | `h` | `~ ma` |
+| uncentered EIF $\phi(O)$ | `ic_expr` | `~ h + alpha * (Y - f)` |
+| $\alpha$ evaluated *under the intervention* | `alpha_star` | `~ 1 / g` |
+| how TMLE updates each nuisance | `targeting_steps` | see Section 4 |
+
+The one-step estimator is then just $n^{-1}\sum_i \phi(O_i)$
+(`riesz_estimate()`), and the TMLE (`riesz_tmle()`) instead *updates the
+fitted regressions* so that the plug-in itself solves
+$n^{-1}\sum_i \alpha(X_i)\{Y_i - m^\star(X_i)\} = 0$, yielding a substitution
+estimator that respects bounds on the outcome.
+
+### 1.4 Nested functionals
+
+Longitudinal regimes, CDEs, and missingness-corrected regime effects are
+*sequences* of conditional expectations,
+
+$$
+\Psi(P) = E\big[h_1(\cdot\,; Q_1)\big], \qquad
+Q_t = E\big[h_{t+1}(\cdot\,; Q_{t+1}) \,\big|\, \bar A_t, \bar L_t\big],
+\qquad Q_T = E\big[Y \mid \bar A_T, \bar L_T\big].
+$$
+
+Each step has its own representer $\alpha_t$, and the EIF stacks them with
+*cumulative products*:
+
+$$
+\phi(O) = h_1 - \psi + \sum_{t=1}^{T}
+\Big(\textstyle\prod_{k \le t} \alpha_k\Big)
+\big[\,h_{t+1} - Q_t\,\big].
+$$
+
+`ComposedRieszCurve` implements exactly this (Section 6), with one indexing
+convention to internalize: **stages are supplied innermost-first**, so the
+residual against the *innermost* regression (the one against $Y$) carries the
+*full* product of representers.
+
+## 2. Anatomy of a `RieszCurve`
+
+We now build the counterfactual mean $E[Y^1]$ by hand, annotating every
+argument. Simulated data with a known truth:
+
+```{r}
+set.seed(1)
+n <- 5000
+
+L <- rnorm(n)
+A <- rbinom(n, 1, plogis(L))
+Y <- rbinom(n, 1, plogis(-0.5 + 1.0 * A + 0.8 * L))
+
+df <- data.frame(L = L, A = A, Y = Y)
+
+# truth: E[ plogis(-0.5 + 1 + 0.8 L) ] by numerical integration
+truth_mu1 <- integrate(function(l) plogis(0.5 + 0.8 * l) * dnorm(l),
+                       -Inf, Inf)$value
+truth_mu1
+```
+
+```{r}
+rc_mu1 <- RieszCurve$new(
+
+  ## (1) nuis: a function of `data` returning a *named list* of numeric
+  ## vectors, each of length nrow(data) (scalars are recycled). This is
+  ## where ALL model fitting lives. Everything the formulas below refer to
+  ## must be returned here (or be a column of `data`).
+  nuis = function(data) {
+    m_fit <- glm(Y ~ L + A, family = binomial(), data = data)
+    g_fit <- glm(A ~ L, family = binomial(), data = data)
+
+    data1 <- data
+    data1$A <- 1                      # counterfactual dataset
+
+    list(
+      m  = predict(m_fit, newdata = data,  type = "response"),  # E[Y|A,L]
+      ma = predict(m_fit, newdata = data1, type = "response"),  # E[Y|1,L]
+      g  = predict(g_fit, newdata = data,  type = "response")   # P(A=1|L)
+    )
+  },
+
+  ## (2) alpha: the Riesz representer AT THE OBSERVED DATA, as a one-sided
+  ## formula. It may reference data columns (A) and nuisance names (g).
+  alpha = ~ I(A == 1) / g,
+
+  ## (3) f: the regression at the observed data — the quantity whose
+  ## residual (Y - f) the representer multiplies in the EIF.
+  f = ~ m,
+
+  ## (4) h: the plug-in transformation h(O; eta), i.e. the regression
+  ## evaluated UNDER THE INTERVENTION. mean(h) is the plug-in estimator.
+  h = ~ ma,
+
+  ## (5) ic_expr: the uncentered EIF. The symbols `alpha`, `f`, `h` refer
+  ## to the components above; data columns and nuisances are also visible.
+  ic_expr = ~ h + alpha * (Y - f),
+
+  ## (6) alpha_star: the representer evaluated UNDER the intervention that
+  ## defines h. For alpha = 1(A=1)/g this is 1/g (set A = 1 in the
+  ## indicator). Used by TMLE to update counterfactual predictions;
+  ## required for composed (sequential) TMLE. Explained in Section 4.
+  alpha_star = ~ 1 / g,
+
+  ## (7) targeting_steps: how the single-curve TMLE updates each nuisance.
+  ## Explained in Section 4. Ignore for one-step estimation.
+  targeting_steps = list(
+    m  = list(),                      # update m with the observed alpha
+    ma = list(alpha_star = ~ 1 / g)   # update ma with the intervened alpha
+  )
+)
+
+rc_mu1
+```
+
+Three rules about the formula interface that will save you debugging time:
+
+1. **Formulas are evaluated in a sealed environment** containing only the
+   columns of `data`, the fitted nuisance vectors, and base R functions.
+   They can *not* see your global workspace, variables captured from an
+   enclosing function, or non-base packages. So `~ I(A == a) / g` with `a`
+   defined outside the formula **fails**; build the formula
+   programmatically instead, as the catalog does:
+
+   ```{r}
+   a <- 1
+   alpha_formula <- as.formula(paste0("~ I(A == ", a, ") / g"))
+   alpha_formula
+   ```
+
+   Similarly, `plogis()` lives in `{stats}`, not `{base}`, so compute such
+   transformations inside `nuis()` and return the result as a nuisance
+   vector rather than calling them inside a formula.
+
+2. **`h` may reference `f`**, which is convenient when the plug-in is a
+   correction of the natural-value regression (e.g. `h = ~ f + delta_term`).
+   `ic_expr` may reference `alpha`, `f`, and `h`.
+
+3. **Nuisance functions must return predictions for every row.**
+   `RieszCurve$fit()` rejects nuisance vectors whose length is not
+   `nrow(data)` (or 1). If you fit a model on a subset — e.g. the outcome
+   regression among the uncensored — fit on the subset but *predict on all
+   rows*.
+
+Fitting the curve evaluates everything and assembles the influence curve:
+
+```{r}
+rc_mu1$fit(df)
+
+head(cbind(alpha = rc_mu1$fit_alpha, f = rc_mu1$fit_f,
+           h = rc_mu1$fit_h, ic = rc_mu1$fit_ic))
+mean(rc_mu1$fit_ic)   # the one-step estimate, computed by hand
+```
+
+## 3. One-step estimation: `riesz_estimate()`
+
+`riesz_estimate()` fits the curve and returns the empirical mean of the
+uncentered EIF, with a variance estimate from the sample variance of the EIF:
+
+```{r}
+fit_os <- riesz_estimate(df, rc_mu1)
+fit_os
+c(estimate = fit_os$estimate, truth = truth_mu1)
+```
+
+The returned `RieszFit` object carries `estimate`, `se`, `var`,
+`ci_low`/`ci_high` (Wald), `n`, and `ic` (the per-observation influence
+curve, which you will need for delta-method contrasts, Section 7).
+
+The one-step estimator needs only `nuis`, `alpha`, `f`, `h`, and `ic_expr` —
+`alpha_star` and `targeting_steps` are TMLE machinery. It is fast, general,
+and doubly robust, but it is *not* a substitution estimator: with weak
+overlap or small samples it can leave the parameter space (e.g. a negative
+estimate of a risk). That is what the TMLE is for.
+
+## 4. TMLE: `riesz_tmle()`, `targeting_steps`, and `alpha_star`
+
+### 4.1 What the fluctuation does
+
+TMLE turns the initial plug-in `mean(h)` into an efficient estimator by
+*updating the fitted regression* rather than adding a correction term. The
+update is a one-dimensional generalized regression: with the logistic
+fluctuation (recommended), the outcome is rescaled to $[0, 1]$ using
+`bounds`, and we fit
+
+$$
+\operatorname{logit}\, m^\star(X) \;=\; \operatorname{logit}\, m(X) \;+\;
+\varepsilon\, \alpha(X),
+$$
+
+i.e. an intercept-free logistic regression of $Y$ on the **clever covariate**
+$\alpha$ with the initial fit as an offset. The MLE $\hat\varepsilon$ solves
+the score equation $n^{-1}\sum_i \alpha(X_i)\{Y_i - m^\star(X_i)\} = 0$ —
+exactly the de-biasing term of the EIF — so the updated plug-in
+$n^{-1}\sum_i h(O_i; m^\star)$ inherits the one-step estimator's asymptotics
+while remaining a substitution estimator that respects `bounds`.
+
+### 4.2 The subtlety: updating the *counterfactual* predictions
+
+Here is the point that `targeting_steps` and `alpha_star` exist to handle,
+and the single most common way to get a hand-rolled TMLE silently wrong.
+
+The fluctuation regression is fit at the *observed* data, where the clever
+covariate is $\alpha(X) = \mathbb{1}(A = 1)/g(L)$. But the final estimate is
+`mean(h_star)`, which evaluates the updated regression *under the
+intervention* — and under the intervention $A = 1$, the indicator is
+identically 1, so the correct clever covariate for updating `ma` is
+$1/g(L)$, **for every unit, including those observed with $A = 0$**. If you
+instead updated `ma` with the observed-data $\alpha$, all units with
+$A = 0$ would receive no update at all, and the "TMLE" would fail to be
+doubly robust (its plug-in never gets repaired where repairs are needed
+most). The distinction is invisible for units with $A = 1$ — which is why
+this bug survives casual testing — and decisive off the intervention's
+support.
+
+`targeting_steps` declares, for each nuisance appearing in `f` or `h`, which
+clever covariate updates it. Each entry is a list with at most one field:
+
+* `list()` — update with the **observed-data** `alpha`. Correct for the
+  natural-value regression `m` appearing in `f` (that is the fluctuation
+  itself).
+* `list(alpha_star = ~ ...)` — update with an explicit clever covariate,
+  evaluated in the same (data, nuisances) environment as the other
+  formulas. **This is the recommended, fully general mechanism.** For
+  indicator representers it is `~ 1/g`; for missingness weights `R/pi` it
+  is `~ 1/pi`; for a density-ratio (shift) representer it is the ratio
+  re-evaluated at the shifted exposure (Section 5.3).
+* `list(set = list(A = 1))` — re-evaluate the `alpha` formula on data with
+  the listed columns overwritten. Convenient when `alpha` is written
+  directly in terms of data columns (e.g. `~ I(A == 1)/g`), but *invalid*
+  when `alpha` is built purely from precomputed nuisance vectors (a density
+  ratio does not change when you overwrite a column it never reads). Prefer
+  `alpha_star`.
+
+All updates share the single fluctuation coefficient $\hat\varepsilon$; they
+differ only in the covariate that multiplies it.
+
+The curve-level `alpha_star` argument plays the analogous role for each
+*stage* of a composed TMLE (Section 6.3), where per-stage `targeting_steps`
+are not consulted.
+
+### 4.3 Running the TMLE
+
+```{r}
+fit_tmle <- riesz_tmle(
+  data = df,
+  rc = rc_mu1,
+  fluctuation_type = "logistic",  # "logistic" (recommended) or "identity"
+  bounds = c(0, 1),               # known range of Y; required for logistic
+  outcome_col = "Y"               # the variable the fluctuation regresses
+)
+
+fit_tmle
+c(one_step = fit_os$estimate, tmle = fit_tmle$estimate, truth = truth_mu1)
+```
+
+Arguments worth knowing:
+
+* `fluctuation_type = "logistic"` performs the update on the
+  logit scale after mapping the outcome into $[0,1]$ via `bounds`; the
+  updated predictions are guaranteed to respect `bounds`. Use it for
+  binary outcomes with `bounds = c(0, 1)` and for continuous outcomes with
+  `bounds = range(Y)` (possibly padded). `"identity"` fits a linear
+  fluctuation and needs no bounds, but offers no range protection.
+* `outcome_col` names the fluctuation target. For a single curve it should
+  be the variable appearing in the residual of your `ic_expr`.
+* `fluctuation_weights` passes observation weights into the fluctuation
+  regression (e.g. inverse-probability-of-censoring weighted TMLEs).
+* `score_tol`: after a successful update, the mean of the *targeted*
+  influence curve must equal the estimate up to numerical error;
+  `riesz_tmle()` warns when it does not. Treat that warning as "my
+  `targeting_steps`/`alpha_star` are wrong", not as noise.
+
+The returned fit contains both `ic` (the untargeted EIF used for the
+variance and confidence intervals) and `ic_star` (the targeted influence
+curve used for the self-check), along with `eps`, `f_star`, `h_star`, and
+the fluctuation model(s).
+
+```{r}
+# Diagnostic: the targeted score equation is solved
+c(mean_ic_star = mean(fit_tmle$ic_star), estimate = fit_tmle$estimate)
+
+# The updated predictions respect the bounds
+range(fit_tmle$h_star)
+```
+
+### 4.4 Why bother? A stress test
+
+With poor initial regressions and near-positivity problems, the one-step
+estimator can escape $[0, 1]$; the bounded TMLE cannot, and both remain
+consistent as long as the weights are consistent (double robustness):
+
+```{r}
+set.seed(6)
+n2 <- 150
+L2 <- rnorm(n2)
+A2 <- rbinom(n2, 1, plogis(-2.5 + 4.5 * L2))        # strong confounding
+Y2 <- rbinom(n2, 1, plogis(-1 + 2 * L2 + 1.5 * A2))
+df2 <- data.frame(L = L2, A = A2, Y = Y2)
+truth2 <- integrate(function(l) plogis(0.5 + 2 * l) * dnorm(l),
+                    -Inf, Inf)$value
+
+rc_bad <- riesz_curve_catalog$cfmean_a(
+  a = 1,
+  nuis = function(data) {
+    m_fit <- lm(Y ~ L + A, data = data)   # deliberately crude linear fit
+    g_fit <- glm(A ~ L, family = binomial(), data = data)
+    d1 <- data; d1$A <- 1
+    list(
+      m  = predict(m_fit, newdata = data),
+      ma = predict(m_fit, newdata = d1),
+      g  = predict(g_fit, newdata = data, type = "response")
+    )
+  }
+)
+
+c(one_step = riesz_estimate(df2, rc_bad)$estimate,   # a "probability"...
+  tmle = riesz_tmle(df2, rc_bad, fluctuation_type = "logistic",
+                    bounds = c(0, 1), outcome_col = "Y")$estimate,
+  truth = truth2)
+```
+
+A handful of huge weights are enough to drag the one-step estimator far
+outside $[0, 1]$; the TMLE processes the same information through a bounded
+update of the regression and cannot leave the parameter space.
+
+Here we used the catalog constructor `riesz_curve_catalog$cfmean_a()`,
+which builds exactly the curve of Section 2 — including its
+`targeting_steps` — from a `nuis` function alone. 
+
+## 5. A recipe for estimands not in the catalog
+
+To implement a new estimand, walk through six questions:
+
+1. **Write the parameter as $\Psi(\eta) = E[h(O; \eta)]$.** What is the
+   nuisance $\eta$ (usually a regression)? What is the linear map $h$?
+2. **Find the representer by change of measure.** Write the parameter as
+   $\int \eta \, dP^\star$ and read off $\alpha = dP^\star/dP$: indicators
+   over propensities for static regimes, $R/\pi$ for missingness, density
+   ratios for shifts, and products of these for nested/coarsened problems.
+3. **Write `nuis()`.** Fit every model once; return the fitted values *at
+   the observed data* and *under the intervention*, plus every weight
+   component your formulas need.
+4. **Fill in `alpha`, `f`, `h`, `ic_expr`.** For conditional-mean nuisances,
+   `ic_expr = ~ h + alpha * (Y - f)` (with `Y` replaced by whatever the
+   regression's outcome is).
+5. **For TMLE, derive `alpha_star`** — the representer with the intervention
+   substituted into it — and declare `targeting_steps` for every nuisance in
+   `f` and `h`.
+6. **Validate.** Check `mean(fit_ic)` against a simulation truth; check
+   double robustness by deliberately misspecifying one nuisance at a time;
+   check that `mean(ic_star)` matches the TMLE estimate (the package warns
+   otherwise).
+
+The remainder of the vignette applies this recipe to progressively harder
+estimands: the ATT (a *ratio* of linear functionals), a missingness-corrected
+mean (where `alpha_star` earns its keep), an MTP (a density-ratio
+representer), and nested functionals (longitudinal regimes and the CDE).
+
+### 5.1 ATT: a smooth transformation of linear functionals
+
+The ATT
+$\psi = E[Y^1 - Y^0 \mid A = 1] = E[A\{Y - m_0(0, L)\}] \,/\, P(A = 1)$
+is not itself linear — it is a **ratio** of two linear functionals. The
+package's pattern for such parameters: fit each linear component as its own
+curve, then combine with the delta method (Section 7). The numerator
+functional $\theta = E[A\{Y - m_0(0,L)\}]$ has $h(O) = A\{Y - m(0,L)\}$ and
+representer $\alpha(O) = -(1 - A)\, g(L)/\{1 - g(L)\}$; the denominator
+$P(A=1)$ is the trivial functional with $\phi = A$. `riesz_att()` wires the
+two together:
+
+```{r}
+set.seed(3)
+n3 <- 5000
+L3 <- rnorm(n3)
+A3 <- rbinom(n3, 1, plogis(L3))
+Y3 <- 2 + L3 + 1.5 * A3 + rnorm(n3, sd = 0.25)   # constant effect: ATT = 1.5
+df3 <- data.frame(L = L3, A = A3, Y = Y3)
+
+fit_att <- riesz_att(df3, nuis = function(data) {
+  g_fit  <- glm(A ~ L, family = binomial(), data = data)
+  m0_fit <- lm(Y ~ L, data = subset(data, A == 0))  # fit on controls...
+  list(
+    m0 = predict(m0_fit, newdata = data),           # ...predict on everyone
+    g  = predict(g_fit, newdata = data, type = "response")
+  )
+})
+fit_att
+```
+
+First, any parameter $b(\psi_1, \ldots, \psi_k)$ with
+smooth $b$ and linear components is in reach: estimate each component, then
+`riesz_delta()`. Second, note that `riesz_att()` is one-step only: because
+$h$ for the numerator involves $Y$ itself rather than a counterfactual
+regression evaluation, there is no `alpha_star`-style plug-in update, and
+`riesz_curve_catalog$att_theta` accordingly declares no `targeting_steps`.
+
+### 5.2 Missing outcomes: where `alpha_star` earns its keep
+
+Under outcome missingness at random given $V$, the mean
+$E[Y] = E[\,m_0(V)\,]$ with $m_0(V) = E[Y \mid R = 1, V]$ has representer
+$\alpha = R/\pi(V)$, $\pi(V) = P(R = 1 \mid V)$. Here `h = ~ m` equals
+`f = ~ m` — there is no counterfactual dataset — but the *update* of the
+plug-in must reach the units with $R = 0$: the clever covariate for `m` in
+`targeting_steps` is $1/\pi(V)$ (all units), while the fluctuation score
+uses $R/\pi(V)$ (only observed residuals are informative). The catalog entry
+encodes this:
+
+```{r}
+set.seed(4)
+n4 <- 20000
+L4 <- rnorm(n4)
+A4 <- rbinom(n4, 1, plogis(L4))
+Yf <- 2 + L4 + 1.5 * A4 + rnorm(n4, sd = 0.25)
+R4 <- rbinom(n4, 1, plogis(-0.5 + 0.5 * L4 + 0.3 * A4))
+df4 <- data.frame(L = L4, A = A4, R = R4, Y = ifelse(R4 == 1, Yf, 0))
+truth_mean <- 2 + 1.5 * 0.5   # E[L]=0, E[A]=1/2
+
+rc_miss <- riesz_curve_catalog$missing_mean(nuis = function(data) {
+  obs <- data[data$R == 1, , drop = FALSE]
+  pi_fit <- glm(R ~ L + A, family = binomial(), data = data)
+  list(
+    m  = rep(mean(obs$Y), nrow(data)),   # deliberately misspecified!
+    pi = predict(pi_fit, newdata = data, type = "response")
+  )
+})
+
+# the naive plug-in is biased ...
+rc_miss$fit(df4); c(plugin = mean(rc_miss$fit_h), truth = truth_mean)
+
+# ... the TMLE repairs it, because 1/pi updates every unit
+fit_miss <- riesz_tmle(df4, rc_miss, fluctuation_type = "logistic",
+                       bounds = range(df4$Y) + c(-1, 1), outcome_col = "Y")
+c(tmle = fit_miss$estimate, truth = truth_mean)
+```
+
+Had `missing_mean` updated `m` with the observed covariate `R/pi`, the
+intercept-only regression would be repaired only among the observed, and
+this display would show a biased TMLE. When you write your own censoring or
+sampling corrections, this is the detail to check first.
+
+### 5.3 Modified treatment policies: density-ratio representers
+
+For a continuous exposure and the additive shift $d(A, L) = A + \delta$, the
+target $E[\,m_0(A + \delta, L)\,]$ has, by change of measure of the exposure
+density,
+
+$$
+\alpha(A, L) = \frac{g(A - \delta \mid L)}{g(A \mid L)},
+\qquad
+\alpha^\star(A, L) = \alpha(A + \delta, L)
+                   = \frac{g(A \mid L)}{g(A + \delta \mid L)},
+$$
+
+where $\alpha^\star$ — the representer *evaluated at the shifted exposure* —
+is the clever covariate for updating the shifted predictions `m_shift`. Note
+that `targeting_steps = list(m_shift = list(set = ...))` would be **wrong**
+here: `alpha` is computed from precomputed density columns, so overwriting
+`A` in the data changes nothing. This is exactly why the general
+`alpha_star` mechanism exists, and why `riesz_curve_catalog$mtp()` requires
+you to supply it for TMLE:
+
+```{r}
+set.seed(5)
+n5 <- 5000
+delta <- 0.5
+L5 <- rnorm(n5)
+A5 <- rnorm(n5, mean = 0.5 * L5, sd = 1)          # A | L ~ N(0.5 L, 1)
+Y5 <- 1 + 1.2 * A5 + 0.8 * L5 + rnorm(n5, sd = 0.5)
+df5 <- data.frame(L = L5, A = A5, Y = Y5)
+truth_mtp <- 1 + 1.2 * delta                      # E[Y] shifts by beta_A * delta
+
+rc_mtp <- riesz_curve_catalog$mtp(
+  nuis = function(data) {
+    m_fit <- lm(Y ~ A + L, data = data)
+    d_shift <- data; d_shift$A <- d_shift$A + delta
+
+    # parametric conditional density of A | L (Gaussian working model)
+    a_fit <- lm(A ~ L, data = data)
+    mu <- predict(a_fit, newdata = data)
+    s  <- summary(a_fit)$sigma
+
+    list(
+      m       = predict(m_fit, newdata = data),
+      m_shift = predict(m_fit, newdata = d_shift),
+      g       = dnorm(data$A,         mean = mu, sd = s),  # g(A | L)
+      g_shift = dnorm(data$A - delta, mean = mu, sd = s),  # g(A - d | L)
+      g_up    = dnorm(data$A + delta, mean = mu, sd = s)   # g(A + d | L)
+    )
+  },
+  alpha_star = ~ g / g_up    # representer at the shifted exposure
+)
+
+fit_mtp_os <- riesz_estimate(df5, rc_mtp)
+fit_mtp <- riesz_tmle(df5, rc_mtp, fluctuation_type = "logistic",
+                      bounds = range(df5$Y) + c(-1, 1), outcome_col = "Y")
+c(one_step = fit_mtp_os$estimate, tmle = fit_mtp$estimate, truth = truth_mtp)
+```
+
+With a flexible density-ratio estimator, replace the Gaussian working model
+inside `nuis()` — e.g. the probabilistic-classifier trick of Díaz et al.
+(2021), in which a classifier is trained to distinguish observed from
+shifted exposures and the ratio is recovered as ` r / (1 - r)`; the package
+never sees how the ratio was produced, only the resulting vectors.
+
+## 6. Nested functionals: `ComposedRieszCurve`
+
+### 6.1 Conventions
+
+A `ComposedRieszCurve` chains single-stage curves to implement the
+sequential-regression EIF of Section 1.4. The conventions:
+
+* **Stages are supplied innermost-first.** `rc_list[[1]]` is the regression
+  fit directly against the outcome `Y` — the *last* time point. Each later
+  stage regresses the previous stage's `h`, which it receives as a data
+  column literally named `` `h[j=1]` ``, `` `h[j=2]` ``, and so on (note the
+  backticks in formulas).
+* **Residual weights are suffix products.** Stage $j$'s residual is weighted
+  by $\omega_j = \prod_{k \ge j} \alpha_k$: the products accumulate from the
+  *outermost* stage (first time point) inward, so the residual against the
+  innermost regression, $Y - f_1$, carries the full product of all
+  representers, while the outermost residual carries that stage's
+  representer alone. The class computes this for you (`fit_omega`), but you
+  should know it when checking an EIF by hand — accumulating the products
+  the other way preserves consistency under correct specification while
+  silently destroying double robustness.
+* **Each stage intervenes only on its own node.** Stage $j$'s `h` evaluates
+  its regression with only its own treatment set; earlier time points stay
+  at their natural values (they are handled by the later stages). This is
+  the standard sequential g-formula recursion.
+
+### 6.2 Longitudinal regime mean $E[Y^{1,1}]$
+
+Two time points with treatment–confounder feedback; the truth is
+$E[Y^{1,1}] = 7.75$ in this design:
+
+```{r}
+set.seed(6)
+sim_long <- function(n) {
+  L1 <- rnorm(n)
+  A1 <- rbinom(n, 1, plogis(-0.2 + 1.0 * L1))
+  L2 <- 0.5 + 0.7 * L1 + 2.0 * A1 + rnorm(n)
+  A2 <- rbinom(n, 1, plogis(-0.3 + 0.6 * A1 + 1.2 * L2))
+  Y  <- 1.0 + 1.5 * L2 + 3.0 * A2 + rnorm(n)
+  data.frame(L1 = L1, A1 = A1, L2 = L2, A2 = A2, Y = Y)
+}
+df6 <- sim_long(10000)
+truth_mu11 <- 1.0 + 1.5 * (0.5 + 2.0) + 3.0
+
+## innermost stage (time 2): regress Y, intervene on A2
+rc_t2 <- RieszCurve$new(
+  nuis = function(data) {
+    m_fit <- lm(Y ~ L1 + A1 + L2 + A2, data = data)
+    g_fit <- glm(A2 ~ L1 + A1 + L2, family = binomial(), data = data)
+    d1 <- data; d1$A2 <- 1
+    list(m  = predict(m_fit, newdata = data),
+         m1 = predict(m_fit, newdata = d1),
+         g  = predict(g_fit, newdata = data, type = "response"))
+  },
+  f = ~ m, h = ~ m1,
+  alpha = ~ A2 / g,
+  alpha_star = ~ 1 / g,                    # required for composed TMLE
+  ic_expr = ~ h + alpha * (Y - f)
+)
+
+## outermost stage (time 1): regress the previous h, intervene on A1
+rc_t1 <- RieszCurve$new(
+  nuis = function(data) {
+    m_fit <- lm(`h[j=1]` ~ L1 + A1, data = data)
+    g_fit <- glm(A1 ~ L1, family = binomial(), data = data)
+    d1 <- data; d1$A1 <- 1
+    list(m  = predict(m_fit, newdata = data),
+         m1 = predict(m_fit, newdata = d1),
+         g  = predict(g_fit, newdata = data, type = "response"))
+  },
+  f = ~ m, h = ~ m1,
+  alpha = ~ A1 / g,
+  alpha_star = ~ 1 / g,
+  ic_expr = ~ h + alpha * (`h[j=1]` - f)
+)
+
+rc_11 <- ComposedRieszCurve$new(rc_list = list(rc_t2, rc_t1))
+
+fit_11_os <- riesz_estimate(df6, rc_11)
+fit_11_tmle <- riesz_tmle(df6, rc_11, fluctuation_type = "logistic",
+                          bounds = range(df6$Y) + c(-1, 1), outcome_col = "Y")
+
+c(one_step = fit_11_os$estimate,
+  tmle = fit_11_tmle$estimate,
+  truth = truth_mu11)
+```
+
+For an **LMTP** — a longitudinal modified treatment policy — the recipe is
+identical, except each stage uses a density-ratio `alpha` (and matching
+shifted-exposure `alpha_star`) exactly as in Section 5.3, in place of the
+indicator-over-propensity representer.
+
+### 6.3 How the composed TMLE targets
+
+`riesz_tmle()` on a composed curve runs the sequential-regression TMLE:
+proceeding innermost-first, it fluctuates stage $j$'s `f` against the current
+target (first `Y`, thereafter the previous stage's updated `h`) with clever
+covariate $\omega_j = \prod_{k \ge j} \alpha_k$, then updates stage $j$'s
+counterfactual predictions with the *intervened* covariate
+$\omega_j^\star = \alpha_j^\star \prod_{k > j} \alpha_k$ — the same
+observed-versus-intervened distinction as in Section 4.2, applied stagewise.
+Consequently **every stage of a composed TMLE must supply `alpha_star`**;
+the per-stage `targeting_steps` are not consulted in the composed path. A
+stage without `alpha_star` triggers a loud warning and an update that is not
+a valid TMLE in general.
+
+The estimator is doubly robust in the classical sequential sense:
+consistency follows if all the sequential regressions or all the
+representers are consistently estimated.
+
+### 6.4 Controlled direct effects: same skeleton, different labels
+
+The CDE mean $E[Y^{a, m}]$ — outcome under a *joint* static intervention on
+treatment $A$ and mediator $M$ — is, via the sequential g-formula,
+
+$$
+\psi_{a,m} = E\Big[\, E\big[\, E[Y \mid L, A, M]\big|_{M=m} \,\Big|\, L, A\big]\Big|_{A=a}\, \Big],
+$$
+
+with representers $\alpha_2 = \mathbb{1}(M = m)/P(M = m \mid A, L)$
+(innermost) and $\alpha_1 = \mathbb{1}(A = a)/P(A = a \mid L)$. Structurally
+this is the two-time-point regime with $(A_1, A_2)$ relabeled $(A, M)$:
+
+```{r}
+set.seed(7)
+n7 <- 10000
+L7 <- rnorm(n7)
+A7 <- rbinom(n7, 1, plogis(L7))
+M7 <- rbinom(n7, 1, plogis(-0.5 + 0.5 * L7 + 1.0 * A7))
+Y7 <- 1 + L7 + 2 * A7 + 1.5 * M7 + 1.0 * A7 * M7 + rnorm(n7)
+df7 <- data.frame(L = L7, A = A7, M = M7, Y = Y7)
+truth_cde11 <- 1 + 2 + 1.5 + 1.0     # E[Y^{a=1,m=1}] = 5.5
+
+rc_M <- RieszCurve$new(              # innermost: intervene on M
+  nuis = function(data) {
+    m_fit <- lm(Y ~ L + A * M, data = data)
+    g_fit <- glm(M ~ L + A, family = binomial(), data = data)
+    d1 <- data; d1$M <- 1
+    list(m  = predict(m_fit, newdata = data),
+         m1 = predict(m_fit, newdata = d1),
+         g  = predict(g_fit, newdata = data, type = "response"))
+  },
+  f = ~ m, h = ~ m1,
+  alpha = ~ I(M == 1) / g, alpha_star = ~ 1 / g,
+  ic_expr = ~ h + alpha * (Y - f)
+)
+
+rc_A <- RieszCurve$new(              # outermost: intervene on A
+  nuis = function(data) {
+    m_fit <- lm(`h[j=1]` ~ L + A, data = data)
+    g_fit <- glm(A ~ L, family = binomial(), data = data)
+    d1 <- data; d1$A <- 1
+    list(m  = predict(m_fit, newdata = data),
+         m1 = predict(m_fit, newdata = d1),
+         g  = predict(g_fit, newdata = data, type = "response"))
+  },
+  f = ~ m, h = ~ m1,
+  alpha = ~ I(A == 1) / g, alpha_star = ~ 1 / g,
+  ic_expr = ~ h + alpha * (`h[j=1]` - f)
+)
+
+rc_cde11 <- ComposedRieszCurve$new(rc_list = list(rc_M, rc_A))
+
+fit_cde11 <- riesz_tmle(df7, rc_cde11, fluctuation_type = "logistic",
+                        bounds = range(df7$Y) + c(-1, 1), outcome_col = "Y")
+c(estimate = fit_cde11$estimate, truth = truth_cde11)
+```
+
+The CDE contrast $E[Y^{1,m}] - E[Y^{0,m}]$ is then a delta-method difference
+of two such fits (next section). Natural direct effects use the same nested
+skeleton with a mediator-density-*ratio* representer,
+$P(M \mid A = 0, L)/P(M \mid A, L)$, in place of the indicator — i.e. the
+mediation analogue of an MTP stage.
+
+Composition also mixes problem types freely: prepend a `missing_mean`-style
+stage to correct any of the above for a MAR outcome, giving, e.g., a
+longitudinal regime effect with a censored final outcome as a three-stage
+composed curve.
+
+## 7. Contrasts and other smooth transformations: `riesz_delta_*()`
+
+Any smooth function $b(\psi_1, \ldots, \psi_k)$ of fitted linear functionals
+is estimated by the delta method from the components' influence curves. Fit
+each component (all fits must be on the *same data*, so the influence curves
+align row-wise), then combine:
+
+```{r}
+rc_mu0 <- riesz_curve_catalog$cfmean_a(
+  a = 0,
+  nuis = function(data) {
+    m_fit <- glm(Y ~ L + A, family = binomial(), data = data)
+    g_fit <- glm(I(A == 0) ~ L, family = binomial(), data = data)
+    d0 <- data; d0$A <- 0
+    list(m  = predict(m_fit, newdata = data, type = "response"),
+         ma = predict(m_fit, newdata = d0, type = "response"),
+         g  = predict(g_fit, newdata = data, type = "response"))
+  }
+)
+
+fit_mu0 <- riesz_tmle(df, rc_mu0, fluctuation_type = "logistic",
+                      bounds = c(0, 1), outcome_col = "Y")
+
+riesz_delta_difference(fit_tmle, fit_mu0, parameter = "ATE = E[Y^1] - E[Y^0]")
+riesz_delta_ratio(fit_tmle, fit_mu0, parameter = "Risk ratio")
+```
+
+Also available: `riesz_delta_log_ratio()`, `riesz_delta_odds_ratio()`,
+`riesz_delta_log_odds_ratio()`, and the general `riesz_delta(fits =, g =,
+grad =)` for arbitrary smooth `g` (the gradient is meant to be supplied by the 
+user as a function of the parameter). This is how one should approach ATEs of composed curves,
+regime contrasts, CDE differences, ratios of MTP means, the ATT, and many other parameters.
+
+## 8. Diagnostics, pitfalls, and good habits
+
+**Check the targeted score.** After `riesz_tmle()`, `mean(fit$ic_star)`
+should equal `fit$estimate` to numerical precision; the function warns via
+`score_tol` when it does not. The usual culprits are a missing or wrong
+`alpha_star`, `set =` used with a nuisance-built `alpha`, or `bounds` that
+clip the data.
+
+**Stress-test double robustness in simulation.** Before trusting a new
+curve, deliberately break one nuisance at a time (e.g. replace a regression
+with its intercept-only version) and confirm the estimator still recovers a
+known truth. This is the test that catches the two classic sequential-TMLE
+bugs — reversed cumulative products and observed-covariate counterfactual
+updates — both of which are invisible when everything is correctly
+specified.
+
+**Formulas are sealed.** No globals, no closure variables, no non-base
+functions. Build formulas with `paste0()`/`as.formula()` when they depend on
+parameters like the treatment level or shift size, and do all nontrivial
+computation inside `nuis()`.
+
+**Nuisances must cover every row.** Fit on subsets when the estimand demands
+it (controls only, uncensored only), but always `predict(..., newdata =
+data)` on the full data; `fit()` errors on length mismatches and `NA`s
+rather than allowing silent misalignment.
+
+**Positivity violations can lead to unstable estimators.** Representers are
+weights; inspect `rc$fit_alpha` (and `fit_omega` for composed curves) for
+extreme values. For long time series, the manuscript notes that the
+cumulative product $\omega_t = \prod_{k \le t} \alpha_k$ is itself a Riesz
+representer and may be estimated *directly* (e.g. by Riesz regression) for
+stability — the composed interface accepts whatever vectors `nuis()`
+returns, so nothing stops you from supplying $\omega_t$ estimates in a
+custom `ic_expr`.
+
+**Cross-fit adaptive learners.** The asymptotics require either Donsker
+conditions or sample splitting. `nuis()` is agnostic about how predictions
+are produced, so out-of-fold predictions from a cross-fitted Super Learner
+drop straight in; see the companion vignette *Cross-fitted Super Learning
+with nadir*.
+
+**Inference notes.** Confidence intervals are Wald intervals based on the
+sample variance of the estimated (untargeted) EIF; this is the standard
+first-order approximation and can be optimistic when nuisances are
+inconsistently estimated or overlap is weak.
+
+## 9. Argument reference card
+
+| Argument | Used by | Meaning |
+|---|---|---|
+| `nuis` | everything | function of `data` returning a named list of prediction vectors (length `nrow(data)` or 1); or the precomputed list itself |
+| `alpha` | EIF, one-step, TMLE fluctuation | Riesz representer at the observed data (formula over data columns + nuisances, or numeric) |
+| `f` | EIF, TMLE offset | regression at the observed data; the residual target |
+| `h` | plug-in, EIF | $h(O;\eta)$: regression evaluated under the intervention; may reference `f` |
+| `ic_expr` | one-step, diagnostics | uncentered EIF; sees `alpha`, `f`, `h`, data, nuisances |
+| `alpha_star` | composed TMLE (per stage); `mtp` catalog | representer evaluated under the intervention defining `h` |
+| `targeting_steps` | single-curve TMLE | per-nuisance update spec: `list()` = observed `alpha`; `list(alpha_star = ~ ...)` = explicit clever covariate (recommended); `list(set = list(col = val))` = re-evaluate `alpha` on intervened data (indicator representers only) |
+| `fluctuation_type`, `bounds` | `riesz_tmle()` | `"logistic"` + outcome bounds (recommended; range-respecting) or `"identity"` |
+| `outcome_col` | `riesz_tmle()` | the fluctuation target; the variable in your innermost residual |
+| `fluctuation_weights`, `clip`, `score_tol` | `riesz_tmle()` | fluctuation observation weights; logit-scale clipping; targeted-score warning threshold |
+
+## References
+
+* Balkus, S. V., Testa, C., and Hejazi, N. S. (2026). A Riesz representer
+  perspective on targeted learning. (The accompanying manuscript; Theorem 1
+  gives the single-step Riesz EIF, Theorem 2 the sequential EIF implemented
+  by `ComposedRieszCurve`, and Algorithms 1 and 3 the TMLEs implemented by
+  `riesz_tmle()`.)
+* Chernozhukov, V., Newey, W. K., and Singh, R. (2022). Automatic debiased
+  machine learning of causal and structural effects. *Econometrica*.
+* Díaz, I., Williams, N., Hoffman, K. L., and Schenck, E. J. (2021).
+  Nonparametric causal effects based on longitudinal modified treatment
+  policies. *JASA*.
+* Hines, O., Dukes, O., Diaz-Ordaz, K., and Vansteelandt, S. (2022).
+  Demystifying statistical learning based on efficient influence functions.
+  *The American Statistician*.
+* van der Laan, M. J. and Gruber, S. (2012). Targeted minimum loss based
+  estimation of causal effects of multiple time point interventions.
+  *The International Journal of Biostatistics*.
+* van der Laan, M. J. and Rose, S. (2011). *Targeted Learning*. Springer.
+* Williams, N. T., Hines, O. J., and Rudolph, K. E. (2025). Riesz
+  representers for the rest of us.
