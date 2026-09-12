@@ -11,6 +11,16 @@
 #'   of a composed curve whose `h` differs from its `f`).
 #' @param fluctuation_type One of `"logistic"` (recommended; requires
 #'   `bounds`) or `"identity"`.
+#' @param fluctuation_method One of `"weighted"` (recommended) or
+#'   `"covariate"`. Both solve the same EIF score equation. Under
+#'   `"weighted"`, the clever covariate enters the fluctuation regression
+#'   through its magnitude as an observation weight, with regressor
+#'   `sign(clever covariate)`; under `"covariate"` (the package's previous
+#'   behavior), the clever covariate enters as the regressor. The weighted
+#'   form is typically more stable when the Riesz representer takes extreme
+#'   values (near-positivity violations, heavily misspecified outcome
+#'   regressions), because each unit's update on the link scale is bounded
+#'   by `|eps|`.
 #' @param bounds Numeric vector of length 2 bounding the outcome scale, used
 #'   by the logistic fluctuation. In the composed case the same bounds are
 #'   applied to all intermediate targets, which are guaranteed to respect
@@ -35,12 +45,15 @@
 riesz_tmle <- function(data,
                        rc,
                        fluctuation_type = "logistic",
+                       fluctuation_method = c("weighted", "covariate"),
                        bounds = NULL,
                        outcome_col,
                        fluctuation_weights = NULL,
                        clip = 1e-6,
                        significance_alpha = 0.05,
                        score_tol = 0.05) {
+
+  fluctuation_method <- match.arg(fluctuation_method)
 
   .validate_riesz_tmle_inputs(
     data = data,
@@ -58,6 +71,7 @@ riesz_tmle <- function(data,
       data = data,
       rc = rc,
       fluctuation_type = fluctuation_type,
+      fluctuation_method = fluctuation_method,
       bounds = bounds,
       outcome_col = outcome_col,
       fluctuation_weights = fluctuation_weights,
@@ -72,6 +86,7 @@ riesz_tmle <- function(data,
       data = data,
       rc = rc,
       fluctuation_type = fluctuation_type,
+      fluctuation_method = fluctuation_method,
       bounds = bounds,
       outcome_col = outcome_col,
       fluctuation_weights = fluctuation_weights,
@@ -154,6 +169,7 @@ riesz_tmle <- function(data,
                                   offset,
                                   clever_covariate,
                                   fluctuation_type,
+                                  fluctuation_method = "covariate",
                                   fluctuation_weights = NULL,
                                   bounds = NULL,
                                   clip = 1e-6) {
@@ -167,6 +183,9 @@ riesz_tmle <- function(data,
   }
   if (anyNA(target) || anyNA(offset) || anyNA(clever_covariate)) {
     stop("`target`, `offset`, and `clever_covariate` cannot contain NA values.")
+  }
+  if (!fluctuation_method %in% c("covariate", "weighted")) {
+    stop("`fluctuation_method` must be one of {'covariate', 'weighted'}.")
   }
   if (!is.null(fluctuation_weights)) {
     if (!is.numeric(fluctuation_weights) || length(fluctuation_weights) != n) {
@@ -187,6 +206,22 @@ riesz_tmle <- function(data,
     return(list(eps = 0, intercept = 0, updated = offset, fit = NULL))
   }
 
+  # Decompose H * (target - Q) = |H| * sign(H) * (target - Q). Under the
+  # weighted form, |H| enters as an observation weight and sign(H) as the
+  # regressor. This solves the SAME score equation as the covariate form,
+  # but keeps extreme representer values out of the linear predictor, so
+  # each unit's update on the link scale is bounded by |eps|.
+  if (fluctuation_method == "weighted") {
+    H_glm <- sign(clever_covariate)
+    w_glm <- abs(clever_covariate)
+    if (!is.null(fluctuation_weights)) {
+      w_glm <- w_glm * fluctuation_weights
+    }
+  } else {
+    H_glm <- clever_covariate
+    w_glm <- fluctuation_weights
+  }
+
   finish <- function(fit, updated_fun) {
     coefs <- stats::coef(fit)
     eps <- unname(coefs["H"])
@@ -202,7 +237,7 @@ riesz_tmle <- function(data,
   if (fluctuation_type == "identity") {
     dat <- data.frame(
       target = target,
-      H = clever_covariate,
+      H = H_glm,
       offset = offset
     )
 
@@ -211,10 +246,10 @@ riesz_tmle <- function(data,
       family = stats::gaussian(),
       data = dat,
       offset = offset,
-      weights = fluctuation_weights
+      weights = w_glm
     )
 
-    return(finish(fit, function(eps) offset + eps * clever_covariate))
+    return(finish(fit, function(eps) offset + eps * H_glm))
   }
 
   if (fluctuation_type == "logistic") {
@@ -224,7 +259,7 @@ riesz_tmle <- function(data,
 
     dat <- data.frame(
       target01 = target01,
-      H = clever_covariate,
+      H = H_glm,
       offset_logit = offset_logit
     )
 
@@ -233,11 +268,11 @@ riesz_tmle <- function(data,
       family = stats::binomial(),
       data = dat,
       offset = offset_logit,
-      weights = fluctuation_weights
+      weights = w_glm
     ))
 
     return(finish(fit, function(eps) {
-      updated01 <- expit(offset_logit + eps * clever_covariate)
+      updated01 <- expit(offset_logit + eps * H_glm)
       updated01 <- clip01(updated01, clip = clip)
       from01(updated01, bounds)
     }))
@@ -291,6 +326,7 @@ riesz_tmle <- function(data,
                                    eps,
                                    intercept = 0,
                                    fluctuation_type,
+                                   fluctuation_method = "covariate",
                                    bounds = NULL,
                                    clip = 1e-6) {
   if (!is.numeric(x) || !is.numeric(clever_covariate)) {
@@ -300,13 +336,22 @@ riesz_tmle <- function(data,
     stop("`x` and `clever_covariate` must have the same length.")
   }
 
+  # Must mirror .fit_tmle_fluctuation(): under the weighted form the fitted
+  # submodel is link(Q_eps) = link(Q) + eps * sign(H) — the magnitude of the
+  # clever covariate lives in the fluctuation weights, not in the update.
+  H_upd <- if (identical(fluctuation_method, "weighted")) {
+    sign(clever_covariate)
+  } else {
+    clever_covariate
+  }
+
   if (fluctuation_type == "identity") {
-    return(x + intercept + eps * clever_covariate)
+    return(x + intercept + eps * H_upd)
   }
 
   if (fluctuation_type == "logistic") {
     x01 <- clip01(to01(x, bounds), clip = clip)
-    x01_star <- expit(logit(x01) + intercept + eps * clever_covariate)
+    x01_star <- expit(logit(x01) + intercept + eps * H_upd)
     x01_star <- clip01(x01_star, clip = clip)
     return(from01(x01_star, bounds))
   }
@@ -317,6 +362,7 @@ riesz_tmle <- function(data,
 .riesz_tmle_single <- function(data,
                                rc,
                                fluctuation_type,
+                               fluctuation_method,
                                bounds,
                                outcome_col,
                                fluctuation_weights,
@@ -349,6 +395,7 @@ riesz_tmle <- function(data,
     offset = f,
     clever_covariate = alpha,
     fluctuation_type = fluctuation_type,
+    fluctuation_method = fluctuation_method,
     fluctuation_weights = fluctuation_weights,
     bounds = bounds,
     clip = clip
@@ -360,6 +407,7 @@ riesz_tmle <- function(data,
     eps = fluc_fit$eps,
     intercept = fluc_fit$intercept,
     fluctuation_type = fluctuation_type,
+    fluctuation_method = fluctuation_method,
     bounds = bounds,
     clip = clip
   )
@@ -413,6 +461,7 @@ riesz_tmle <- function(data,
 .riesz_tmle_composed <- function(data,
                                  rc,
                                  fluctuation_type,
+                                 fluctuation_method,
                                  bounds,
                                  outcome_col,
                                  fluctuation_weights,
@@ -499,6 +548,7 @@ riesz_tmle <- function(data,
       offset = f_list[[j]],
       clever_covariate = omega_list[[j]],
       fluctuation_type = fluctuation_type,
+      fluctuation_method = fluctuation_method,
       fluctuation_weights = fluctuation_weights,
       bounds = bounds,
       clip = clip
@@ -518,6 +568,7 @@ riesz_tmle <- function(data,
       eps = fluc$eps,
       intercept = fluc$intercept,
       fluctuation_type = fluctuation_type,
+      fluctuation_method = fluctuation_method,
       bounds = bounds,
       clip = clip
     )
@@ -634,7 +685,9 @@ riesz_tmle <- function(data,
 # produce targeted nuisances ----------------------------------------------
 
 .build_targeted_nuisance_list <- function(rc, data, eps, intercept,
-                                          fluctuation_type, bounds, clip) {
+                                          fluctuation_type,
+                                          fluctuation_method = "covariate",
+                                          bounds, clip) {
   nuis_star <- rc$fit_nuis
 
   if (is.null(rc$targeting_steps)) {
@@ -680,6 +733,7 @@ riesz_tmle <- function(data,
       eps = eps,
       intercept = intercept,
       fluctuation_type = fluctuation_type,
+      fluctuation_method = fluctuation_method,
       bounds = bounds,
       clip = clip
     )
