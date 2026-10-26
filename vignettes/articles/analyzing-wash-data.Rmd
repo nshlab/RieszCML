@@ -6,7 +6,7 @@ output: html_document
 Load packages and the data
 ```{R}
 library(devtools)
-load_all('/home/salbalkus/Research/RieszCML/')
+library(RieszCML)
 
 library(nadir)
 library(readr)

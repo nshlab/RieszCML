@@ -8,9 +8,8 @@ vignette: >
 ---
 
 ```{r, include = FALSE}
-# the version of nadir with crossfit_super_learner() is not (yet) on CRAN
+library(RieszCML)
 library(nadir)
-
 
 knitr::opts_chunk$set(
   collapse = TRUE,
@@ -37,9 +36,6 @@ estimated without the held-out fold — and returns out-of-fold predictions in
 the original row order, which is exactly what a `nuis` function must supply.
 
 ```{r}
-library(RieszCML)
-library(nadir)
-
 simulate_data <- function(n, seed = NULL) {
   if (!is.null(seed)) set.seed(seed)
 
@@ -100,9 +96,8 @@ prop_formula <- A ~ L1 + L2 + L3 + L4 +
   I(sin(L1)) + I(L2^2) + I(L3 * L4) + I(L1 > 0) + I(L2 > 1)
 
 learner_library <- list(
+  mean = nadir::lnr_mean,
   logistic = nadir::lnr_logistic,
-  rf       = nadir::lnr_rf_binary,
-  xgboost  = nadir::lnr_xgboost,
   glmnet   = nadir::lnr_glmnet
 )
 
@@ -170,12 +165,12 @@ nuisances a `RieszCurve` needs:
 
 * `$oof_predictions()` — out-of-fold predictions at the observed data, in
   original row order: this is `m` (or `g`);
-* `$predict_modified(modify)` — out-of-fold predictions after applying an
+* `$oof_predict_modified(modify)` — out-of-fold predictions after applying an
   intervention to each held-out fold, e.g. setting `A = 1`: this is `m1`;
-* `$sl_fits`, `$cv_loss`, `$fold_assignments` — diagnostics, used below.
+* `$sl_fits`, `$cv_loss` — diagnostics that are used below.
 
 ```{r}
-make_nuis_superlearner_cf <- function(n_folds = 5, inner_n_folds = 5) {
+make_nuis_superlearner_cf <- function(n_folds = 2, inner_n_folds = 2) {
   function(data) {
     cf_m <- nadir::crossfit_super_learner(
       data = data,
@@ -196,10 +191,10 @@ make_nuis_superlearner_cf <- function(n_folds = 5, inner_n_folds = 5) {
     )
 
     list(
-      m  = cf_m$oof_predictions(),
-      m1 = cf_m$predict_modified(function(d) { d$A <- 1; d }),
-      m0 = cf_m$predict_modified(function(d) { d$A <- 0; d }),
-      g  = cf_g$oof_predictions()
+      m  = cf_m$oof_predictions,
+      m1 = cf_m$oof_predict_modified(function(d) { d$A <- 1; d }),
+      m0 = cf_m$oof_predict_modified(function(d) { d$A <- 0; d }),
+      g  = cf_g$oof_predictions
     )
   }
 }
@@ -217,19 +212,10 @@ fit_ate_cf
 c(estimate = fit_ate_cf$estimate, truth = truth_ate)
 ```
 
-Compared to a hand-rolled fold loop, note what came for free here: the
-ensemble weights of each fold's Super Learner were estimated without the
-held-out observations (a hand-rolled loop that calls `super_learner()` per
-fold gets this too, but only if written carefully); the validation folds are
-checked to be disjoint; predictions are reconstructed in original row order;
-and if any row were never held out, its prediction would be `NA` — which
-`RieszCurve$fit()` rejects loudly rather than letting a silently misaligned
-nuisance vector through.
-
 ## Inspecting the cross-fit
 
-Because the fitted objects are retained, the cross-fit is easy to audit. It
-can be worth doing this *outside* the `nuis` function during exploratory
+Because the fitted objects are retained, the cross-fit is easy to look into. It
+can be worth doing this outside the `nuis` function during exploratory
 work, then wrapping the final recipe as above:
 
 ```{r}
@@ -249,32 +235,6 @@ cf_m$cv_loss
 
 # ensemble weights estimated within each outer training split
 lapply(cf_m$sl_fits, `[[`, "learner_weights")
-
-# which outer fold held out each observation
-table(cf_m$fold_assignments)
 ```
 
-Stable learner weights across folds suggest the ensemble is not being driven
-by a few influential observations; wildly varying weights are a hint to
-enlarge the library or the sample.
 
-## Practical notes
-
-**Sharing folds across nuisances.** As written, `m` and `g` are cross-fitted
-on independently drawn fold splits, which is standard and asymptotically
-valid. If you prefer that both nuisances share the same outer folds (e.g.
-for exact reproducibility of fold-level diagnostics), pass a common
-`cv_schema` function to both `crossfit_super_learner()` calls.
-
-**Parallelism.** Fitting is parallelized over outer folds via the `{future}`
-framework: load `{future}` and declare, e.g., `plan(multisession)` before
-calling `crossfit_super_learner()`; use
-`options(future.globals.maxSize = Inf)` if large learner objects need to be
-exported to workers. A nested topology (see `?future::plan`) additionally
-parallelizes the inner Super Learners. This vignette runs sequentially so it
-builds anywhere.
-
-**Cross-fitting the fluctuation?** `riesz_tmle()` fits its one-dimensional
-fluctuation on the full sample. This is the standard CV-TMLE-adjacent
-construction: with cross-fitted initial nuisances, the parametric
-fluctuation step does not reintroduce Donsker-type problems.

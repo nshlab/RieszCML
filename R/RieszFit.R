@@ -1,3 +1,22 @@
+#' Fitted Riesz Estimator
+#'
+#' R6 class holding the output of [riesz_estimate()], [riesz_tmle()], and
+#' [riesz_delta()]: a point estimate, influence-curve-based variance and
+#' Wald interval, and (for TMLE) the targeting internals.
+#'
+#' @field estimate Point estimate.
+#' @field var,se Estimated variance and standard error.
+#' @field ci_low,ci_high Wald confidence interval limits.
+#' @field significance_alpha Significance level of the interval.
+#' @field estimator,parameter Labels for the estimator and target parameter.
+#' @field n Sample size.
+#' @field ic Influence curve used for inference.
+#' @field ic_star Targeted influence curve (TMLE only).
+#' @field eps,intercept Fluctuation coefficients (TMLE only).
+#' @field f_star,h_star Targeted predictions (TMLE only).
+#' @field fluctuation_model,fluctuation_models Fitted fluctuation GLM(s).
+#' @field omega,targets Cumulative representer products and stagewise
+#'   targets (composed TMLE only).
 #' @export
 RieszFit <- R6::R6Class(
   classname = "RieszFit",

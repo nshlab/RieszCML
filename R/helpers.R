@@ -1,9 +1,22 @@
 
+#' Logit and expit (inverse logit) transformations
+#'
+#' `logit(p)` computes \eqn{\log\{p / (1 - p)\}} and `expit(x)` computes
+#' \eqn{1 / (1 + e^{-x})}. Thin wrappers around [stats::qlogis()] and
+#' [stats::plogis()], used by the logistic fluctuation in [riesz_tmle()].
+#'
+#' @param p Numeric vector of probabilities in (0, 1).
+#' @param x Numeric vector on the logit scale.
+#' @return A numeric vector.
+#' @name logit
 #' @export
-logit <- qlogis
+#' @examples
+#' expit(logit(0.3))
+logit <- function(p) stats::qlogis(p)
 
+#' @rdname logit
 #' @export
-expit <- plogis
+expit <- function(x) stats::plogis(x)
 
 to01 <- function(x, bounds) {
   if (is.null(bounds)) stop("`bounds` must be provided for logistic fluctuation.")

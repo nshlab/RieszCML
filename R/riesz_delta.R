@@ -1,4 +1,28 @@
 
+#' Delta-method combinations of Riesz fits
+#'
+#' Combine one or more [RieszFit] objects, fit on the same data, into an
+#' estimate of a smooth function \eqn{g(\psi_1, \ldots, \psi_k)}, with
+#' influence-curve-based standard errors and Wald intervals.
+#' `riesz_delta_difference()`, `riesz_delta_ratio()`,
+#' `riesz_delta_log_ratio()`, `riesz_delta_odds_ratio()`, and
+#' `riesz_delta_log_odds_ratio()` are convenience wrappers for common
+#' contrasts of two fits.
+#'
+#' @param ... `RieszFit` objects (alternative to `fits`).
+#' @param fits A list of `RieszFit` objects with influence curves of equal length.
+#' @param g A function of the numeric vector of component estimates
+#'   returning a scalar.
+#' @param grad Optional function returning the gradient of `g`; if `NULL`,
+#'   a central finite-difference gradient is used.
+#' @param significance_alpha Significance level for Wald intervals.
+#' @param numgrad_eps Step size for the numerical gradient.
+#' @param parameter Optional label for the target parameter.
+#' @param estimator Label for the estimator.
+#' @param fit1,fit2 `RieszFit` objects for the two components of a contrast.
+#' @param tol Tolerance for checking that denominators or probabilities are
+#'   bounded away from 0 (and 1).
+#' @return A [RieszFit].
 #' @export
 riesz_delta <- function(...,
                         fits = NULL,
@@ -137,6 +161,7 @@ riesz_delta <- function(...,
 
 # common usages of delta method (differences, [log] RR, [log] OR) --------------
 
+#' @rdname riesz_delta
 #' @export
 riesz_delta_difference <- function(fit1,
                                    fit2,
@@ -152,6 +177,7 @@ riesz_delta_difference <- function(fit1,
   )
 }
 
+#' @rdname riesz_delta
 #' @export
 riesz_delta_ratio <- function(fit1,
                               fit2,
@@ -172,6 +198,7 @@ riesz_delta_ratio <- function(fit1,
   )
 }
 
+#' @rdname riesz_delta
 #' @export
 riesz_delta_log_ratio <- function(fit1,
                                   fit2,
@@ -192,6 +219,7 @@ riesz_delta_log_ratio <- function(fit1,
   )
 }
 
+#' @rdname riesz_delta
 #' @export
 riesz_delta_odds_ratio <- function(fit1,
                                    fit2,
@@ -225,6 +253,7 @@ riesz_delta_odds_ratio <- function(fit1,
   )
 }
 
+#' @rdname riesz_delta
 #' @export
 riesz_delta_log_odds_ratio <- function(fit1,
                                        fit2,

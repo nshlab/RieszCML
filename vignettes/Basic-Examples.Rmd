@@ -1,0 +1,192 @@
+---
+title: "Basic Examples"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Basic Examples}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+This vignette shows the three things most analyses need: estimating a single
+linear functional, contrasting two of them, and chaining functionals for a
+longitudinal regime. Nuisance functions are fit with `glm()` and `lm()` to keep
+the examples fast and dependency-free; in practice you would substitute any
+learner, ideally cross-fitted (see the *Cross-fitted Super Learning with nadir*
+vignette).
+
+```{r setup}
+library(RieszCML)
+```
+
+## 1. A counterfactual mean
+
+We simulate a point-treatment study with a binary outcome, so the truth
+$E[Y^1] = E[P(Y = 1 \mid A = 1, L)]$ can be computed by numerical integration.
+
+```{r}
+set.seed(1)
+n <- 2000
+L <- rnorm(n)
+A <- rbinom(n, 1, plogis(0.5 * L))
+Y <- rbinom(n, 1, plogis(-0.5 + A + 0.8 * L))
+df <- data.frame(L = L, A = A, Y = Y)
+
+truth_mu1 <- integrate(function(l) plogis(0.5 + 0.8 * l) * dnorm(l), -Inf, Inf)$value
+truth_mu0 <- integrate(function(l) plogis(-0.5 + 0.8 * l) * dnorm(l), -Inf, Inf)$value
+```
+
+A `RieszCurve` describes the functional: the fitted nuisances (`nuis`), the
+Riesz representer at the observed data (`alpha`), the regression whose residual
+it multiplies (`f`), the plug-in under the intervention (`h`), and the
+uncentered efficient influence function (`ic_expr`). The `alpha_star` and
+`targeting_steps` arguments tell the TMLE how to update the counterfactual
+predictions.
+
+```{r}
+rc_mu1 <- RieszCurve$new(
+  nuis = function(data) {
+    m_fit <- glm(Y ~ A + L, family = binomial(), data = data)
+    g_fit <- glm(A ~ L, family = binomial(), data = data)
+    data1 <- data
+    data1$A <- 1
+    list(
+      m  = predict(m_fit, newdata = data,  type = "response"),  # E[Y | A, L]
+      m1 = predict(m_fit, newdata = data1, type = "response"),  # E[Y | A = 1, L]
+      g  = predict(g_fit, newdata = data,  type = "response")   # P(A = 1 | L)
+    )
+  },
+  alpha = ~ A / g,
+  f = ~ m,
+  h = ~ m1,
+  ic_expr = ~ h + alpha * (Y - f),
+  alpha_star = ~ 1 / g,
+  targeting_steps = list(m = list(), m1 = list(alpha_star = ~ 1 / g))
+)
+```
+
+The one-step estimator averages the influence function; the TMLE instead
+updates the fitted regressions, which keeps the estimate within the bounds of
+the outcome.
+
+```{r}
+fit_os <- riesz_estimate(df, rc_mu1)
+fit_os
+
+fit_tmle <- riesz_tmle(df, rc_mu1, fluctuation_type = "logistic",
+                       bounds = c(0, 1), outcome_col = "Y")
+fit_tmle
+
+c(one_step = fit_os$estimate, tmle = fit_tmle$estimate, truth = truth_mu1)
+```
+
+## 2. Contrasts: the average treatment effect and risk ratio
+
+Common functionals are available in `riesz_curve_catalog`, which builds the
+same kind of curve from a `nuis` function alone. Here we fit $E[Y^0]$ and
+combine it with the fit above using the delta method. All fits must use the
+same data, so their influence functions line up row by row.
+
+```{r}
+rc_mu0 <- riesz_curve_catalog$cfmean_a(
+  a = 0,
+  nuis = function(data) {
+    m_fit <- glm(Y ~ A + L, family = binomial(), data = data)
+    g_fit <- glm(I(A == 0) ~ L, family = binomial(), data = data)
+    data0 <- data
+    data0$A <- 0
+    list(
+      m  = predict(m_fit, newdata = data,  type = "response"),
+      ma = predict(m_fit, newdata = data0, type = "response"),
+      g  = predict(g_fit, newdata = data,  type = "response")   # P(A = 0 | L)
+    )
+  }
+)
+
+fit_mu0 <- riesz_tmle(df, rc_mu0, fluctuation_type = "logistic",
+                      bounds = c(0, 1), outcome_col = "Y")
+
+fit_ate <- riesz_delta_difference(fit_tmle, fit_mu0, parameter = "ATE")
+fit_rr  <- riesz_delta_ratio(fit_tmle, fit_mu0, parameter = "Risk ratio")
+
+fit_ate
+c(ate = fit_ate$estimate, truth = truth_mu1 - truth_mu0)
+c(rr = fit_rr$estimate, truth = truth_mu1 / truth_mu0)
+```
+
+## 3. A nested functional: a two-time-point regime
+
+The mean outcome under treatment at both time points, $E[Y^{1,1}]$, is a
+sequence of two regressions. Each stage is its own `RieszCurve`, and
+`ComposedRieszCurve` chains them. Stages are supplied **innermost first**: the
+first stage regresses `Y`, and the second regresses the first stage's plug-in,
+which it sees as a column named `` `h[j=1]` ``.
+
+```{r}
+set.seed(2)
+n <- 5000
+L1 <- rnorm(n)
+A1 <- rbinom(n, 1, plogis(-0.2 + L1))
+L2 <- 0.5 + 0.7 * L1 + 2 * A1 + rnorm(n)
+A2 <- rbinom(n, 1, plogis(-0.3 + 0.6 * A1 + 1.2 * L2))
+Y  <- 1 + 1.5 * L2 + 3 * A2 + rnorm(n)
+df_long <- data.frame(L1, A1, L2, A2, Y)
+
+truth_mu11 <- 1 + 1.5 * (0.5 + 2) + 3   # = 7.75
+
+rc_t2 <- RieszCurve$new(            # innermost stage: time 2
+  nuis = function(data) {
+    m_fit <- lm(Y ~ L1 + A1 + L2 + A2, data = data)
+    g_fit <- glm(A2 ~ L1 + A1 + L2, family = binomial(), data = data)
+    d1 <- data
+    d1$A2 <- 1
+    list(m  = predict(m_fit, newdata = data),
+         m1 = predict(m_fit, newdata = d1),
+         g  = predict(g_fit, newdata = data, type = "response"))
+  },
+  alpha = ~ A2 / g, alpha_star = ~ 1 / g,
+  f = ~ m, h = ~ m1,
+  ic_expr = ~ h + alpha * (Y - f)
+)
+
+rc_t1 <- RieszCurve$new(            # outermost stage: time 1
+  nuis = function(data) {
+    m_fit <- lm(`h[j=1]` ~ L1 + A1, data = data)
+    g_fit <- glm(A1 ~ L1, family = binomial(), data = data)
+    d1 <- data
+    d1$A1 <- 1
+    list(m  = predict(m_fit, newdata = data),
+         m1 = predict(m_fit, newdata = d1),
+         g  = predict(g_fit, newdata = data, type = "response"))
+  },
+  alpha = ~ A1 / g, alpha_star = ~ 1 / g,
+  f = ~ m, h = ~ m1,
+  ic_expr = ~ h + alpha * (`h[j=1]` - f)
+)
+
+rc_11 <- ComposedRieszCurve$new(rc_list = list(rc_t2, rc_t1))
+
+fit_11_os   <- riesz_estimate(df_long, rc_11)
+fit_11_tmle <- riesz_tmle(df_long, rc_11, fluctuation_type = "logistic",
+                          bounds = range(df_long$Y) + c(-1, 1),
+                          outcome_col = "Y")
+
+c(one_step = fit_11_os$estimate, tmle = fit_11_tmle$estimate, truth = truth_mu11)
+```
+
+Every stage of a composed TMLE needs `alpha_star`, the representer evaluated
+under that stage's intervention. For a continuous outcome, the logistic
+fluctuation needs `bounds` that contain every observed outcome; padding the
+observed range, as above, is a simple choice.
+
+## Where to go next
+
+- *Getting Started with RieszCML* explains each argument and how to derive a
+  Riesz representer for an estimand that isn't in the catalog.
+- *Delta-method contrasts* covers odds ratios and general smooth
+  transformations via `riesz_delta()`.
+- *Cross-fitted Super Learning with nadir* shows how to plug in flexible,
+  cross-fitted nuisance estimates.

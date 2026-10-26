@@ -2,8 +2,12 @@
 
 #' Estimate a Statistical Parameter using a RieszCurve
 #'
+#' @param data A `data.frame`-like object containing the observed data.
+#' @param rc A [RieszCurve] or [ComposedRieszCurve].
+#' @param significance_alpha Significance level for the Wald interval.
+#' @return A [RieszFit].
 #' @export
-#' @examples
+#' @examplesIf requireNamespace("nadir", quietly = TRUE)
 #'
 #' rc_ate <- RieszCurve$new(
 #'   nuis = function(data) {
