@@ -10,7 +10,7 @@ riesz_tmle(
   fluctuation_type = "logistic",
   fluctuation_method = c("weighted", "covariate"),
   bounds = NULL,
-  outcome_col,
+  outcome_col = NULL,
   fluctuation_weights = NULL,
   clip = 1e-06,
   significance_alpha = 0.05,
@@ -44,7 +44,9 @@ by the logistic fluctuation. In the composed case the same bounds are
 applied to all intermediate targets, which are guaranteed to respect
 them by construction of the logistic update.}
 
-\item{outcome_col}{Name of the outcome column in `data`.}
+\item{outcome_col}{Name of the outcome column in `data`. Required for a
+single [RieszCurve]. For a [ComposedRieszCurve] it defaults to the
+curve's own `outcome_col`, and supplying a different value is an error.}
 
 \item{fluctuation_weights}{Optional nonnegative observation weights for
 the fluctuation regressions.}

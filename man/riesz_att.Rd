@@ -4,16 +4,26 @@
 \alias{riesz_att}
 \title{Estimate the Average Treatment Effect on the Treated}
 \usage{
-riesz_att(data, nuis, significance_alpha = 0.05)
+riesz_att(
+  data,
+  nuis,
+  significance_alpha = 0.05,
+  outcome = "Y",
+  treatment = "A"
+)
 }
 \arguments{
-\item{data}{A `data.frame`-like object with columns `A` and `Y`.}
+\item{data}{A `data.frame`-like object with a 0/1 treatment column and
+an outcome column (named `A` and `Y` unless `treatment` / `outcome`
+say otherwise).}
 
 \item{nuis}{A function of `data` returning a named list with elements
 `m0` (predictions of \eqn{E[Y | A = 0, L]} for all units) and `g`
 (predictions of \eqn{P(A = 1 | L)}).}
 
 \item{significance_alpha}{Significance level for Wald intervals.}
+
+\item{outcome, treatment}{Names of the outcome and treatment columns.}
 }
 \description{
 One-step, doubly robust estimation of

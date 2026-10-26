@@ -13,6 +13,15 @@ outcome `Y` (the last time point), and each later stage acts on the
 previous stage's `h`, which is made available to it as a data column named
 `h[j=<stage>]`.
 }
+\section{Outcome column}{
+
+The outcome column is declared once, via `outcome_col` (default `"Y"`),
+and must be the column that `rc_list[[1]]$ic_expr` refers to; the
+constructor checks this and errors otherwise. [riesz_estimate()] and
+[riesz_tmle()] both read the column name from the composed curve, so
+`riesz_tmle()` needs no `outcome_col` argument for a composed curve.
+}
+
 \section{Influence curve}{
 
 With stages indexed innermost-first, the (uncentered) efficient influence

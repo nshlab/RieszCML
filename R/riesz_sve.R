@@ -17,6 +17,9 @@
 #'   nuisance list.
 #' @param estimator `"tmle"` or `"onestep"` for the two numerators.
 #' @param bounds Outcome bounds for the logistic fluctuation.
+#' @param significance_alpha Significance level for Wald intervals.
+#' @param ... Further arguments passed to [riesz_tmle()] when
+#'   `estimator = "tmle"` (e.g. `fluctuation_method`, `clip`, `score_tol`).
 #' @return A list with `RieszFit`s `sve`, `risk_vaccine`, `risk_placebo`.
 #' @export
 riesz_sve <- function(data, delta,
@@ -97,6 +100,13 @@ riesz_sve <- function(data, delta,
 #' Gaussian marker density), IPW-weighted by the known phase-two sampling
 #' probabilities in column `pi_col`. Swap in crossfit super learners for
 #' real analyses; the contracts are documented in `riesz_curve_catalog`.
+#' @param covariates Character vector of baseline covariate column names
+#'   (the `L` in the nuisance contracts).
+#' @param pi_col Name of the column holding the known phase-two sampling
+#'   probabilities \eqn{P(R = 1 | V, A = 1)}.
+#' @return A named list of nuisance functions: `censoring`, `shift`,
+#'   `phase2`, `placebo`, suitable for the matching `nuis_*` arguments of
+#'   [riesz_sve()].
 #' @export
 sve_glm_nuisances <- function(covariates, pi_col = "pi_R") {
   rhs_L <- paste(covariates, collapse = " + ")
@@ -105,27 +115,30 @@ sve_glm_nuisances <- function(covariates, pi_col = "pi_R") {
 
   censoring <- function(data) {
     d <- data; d$w_ipw <- ipw(d)
-    fitC <- stats::glm(as.formula(paste("C ~ S +", rhs_L)),
+    d2 <- d[vac2(d), ]
+    d2c <- d[vac2(d) & d$C == 1, ]
+    fitC <- stats::glm(stats::as.formula(paste("C ~ S +", rhs_L)),
                        family = stats::quasibinomial(),
-                       data = d[vac2(d), ], weights = w_ipw)
-    fitY <- stats::glm(as.formula(paste("Y ~ S +", rhs_L)),
+                       data = d2, weights = d2$w_ipw)
+    fitY <- stats::glm(stats::as.formula(paste("Y ~ S +", rhs_L)),
                        family = stats::quasibinomial(),
-                       data = d[vac2(d) & d$C == 1, ], weights = w_ipw)
+                       data = d2c, weights = d2c$w_ipw)
     list(mC = stats::predict(fitY, newdata = d, type = "response"),
          pC = stats::predict(fitC, newdata = d, type = "response"))
   }
 
   shift <- function(data, delta) {
     d <- data; d$w_ipw <- ipw(d); d$h1 <- data[["h[j=1]"]]
-    fitM <- stats::glm(as.formula(paste("h1 ~ S +", rhs_L)),
+    d2 <- d[vac2(d), ]
+    fitM <- stats::glm(stats::as.formula(paste("h1 ~ S +", rhs_L)),
                        family = stats::quasibinomial(),
-                       data = d[vac2(d), ], weights = w_ipw)
+                       data = d2, weights = d2$w_ipw)
     d_up <- d; d_up$S <- d$S + delta
 
-    fitS <- stats::lm(as.formula(paste("S ~", rhs_L)),
-                      data = d[vac2(d), ], weights = w_ipw)
+    fitS <- stats::lm(stats::as.formula(paste("S ~", rhs_L)),
+                      data = d2, weights = d2$w_ipw)
     mu <- stats::predict(fitS, newdata = d)
-    w <- d$w_ipw[vac2(d)]
+    w <- d2$w_ipw
     s <- sqrt(sum(w * stats::residuals(fitS)^2) / sum(w))
 
     list(m       = stats::predict(fitM, newdata = d,    type = "response"),
@@ -137,7 +150,7 @@ sve_glm_nuisances <- function(covariates, pi_col = "pi_R") {
 
   phase2 <- function(data) {
     d <- data; d$h2 <- data[["h[j=2]"]]; d$CY <- d$C * d$Y
-    fit3 <- stats::glm(as.formula(paste("h2 ~ C + CY +", rhs_L)),
+    fit3 <- stats::glm(stats::as.formula(paste("h2 ~ C + CY +", rhs_L)),
                        family = stats::quasibinomial(), data = d[vac2(d), ])
     list(m  = ifelse(d$A == 1,
                      stats::predict(fit3, newdata = d, type = "response"), 0),
@@ -146,9 +159,9 @@ sve_glm_nuisances <- function(covariates, pi_col = "pi_R") {
 
   placebo <- function(data) {
     pl <- data$A == 0
-    fitC0 <- stats::glm(as.formula(paste("C ~", rhs_L)),
+    fitC0 <- stats::glm(stats::as.formula(paste("C ~", rhs_L)),
                         family = stats::binomial(), data = data[pl, ])
-    fitY0 <- stats::glm(as.formula(paste("Y ~", rhs_L)),
+    fitY0 <- stats::glm(stats::as.formula(paste("Y ~", rhs_L)),
                         family = stats::binomial(),
                         data = data[pl & data$C == 1, ])
     list(m0  = stats::predict(fitY0, newdata = data, type = "response"),

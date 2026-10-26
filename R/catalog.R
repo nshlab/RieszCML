@@ -48,24 +48,39 @@
 #' riesz_estimate(data = df, rc = rc_cfmean_1)
 riesz_curve_catalog <- list()
 
+# Backtick-quote a column name so catalog formulas work for any outcome /
+# treatment name, including non-syntactic ones (e.g. `HIV infection`).
+.bt <- function(x) {
+  if (!is.character(x) || length(x) != 1L || is.na(x) || x == "") {
+    stop("Column names passed to catalog constructors must be non-empty ",
+         "character scalars.")
+  }
+  paste0("`", x, "`")
+}
+.f <- function(...) stats::as.formula(paste0(...), env = baseenv())
+
 #' @section Counterfactual mean `cfmean_a(a, nuis)`:
 #' Target: \eqn{E[E(Y | A = a, L)]}. The `nuis` function must return
 #' `m` (\eqn{E[Y | A, L]} at observed data), `ma` (\eqn{E[Y | A = a, L]}),
-#' and `g` (\eqn{P(A = a | L)}). Data columns `A` and `Y` are assumed to be
-#' named literally `A` and `Y`.
+#' and `g` (\eqn{P(A = a | L)}). By default the treatment and outcome
+#' columns are assumed to be named `A` and `Y`; pass `treatment = ` and
+#' `outcome = ` to use other names. The same applies to `ate()`
+#' (`outcome`, `treatment`), `subgroup_mean()` (`outcome`, `subgroup`),
+#' `missing_mean()` (`outcome`, `observed`), and `mtp()` (`outcome`).
+#' Nuisance functions must, of course, read the same columns.
 riesz_curve_catalog$cfmean_a <- function(
     a,
-    nuis) {
-
-  alpha_formula <- as.formula(paste0('~ I(A == ', a, ')/g'))
+    nuis,
+    outcome = "Y",
+    treatment = "A") {
 
   return(RieszCurve$new(
     nuis = nuis,
-    alpha = alpha_formula,
+    alpha = .f("~ I(", .bt(treatment), " == ", a, ")/g"),
     alpha_star = ~ 1/g,
     f = ~ m,
     h = ~ ma,
-    ic_expr = ~ h + alpha * (Y - f),
+    ic_expr = .f("~ h + alpha * (", .bt(outcome), " - f)"),
     targeting_steps = list(
       m = list(),
       ma = list(alpha_star = ~ 1/g)
@@ -74,12 +89,12 @@ riesz_curve_catalog$cfmean_a <- function(
 }
 
 
-riesz_curve_catalog$cfmean_a1 <- function(nuis) {
-  riesz_curve_catalog$cfmean_a(a = 1, nuis = nuis)
+riesz_curve_catalog$cfmean_a1 <- function(nuis, ...) {
+  riesz_curve_catalog$cfmean_a(a = 1, nuis = nuis, ...)
 }
 
-riesz_curve_catalog$cfmean_a0 <- function(nuis) {
-  riesz_curve_catalog$cfmean_a(a = 0, nuis = nuis)
+riesz_curve_catalog$cfmean_a0 <- function(nuis, ...) {
+  riesz_curve_catalog$cfmean_a(a = 0, nuis = nuis, ...)
 }
 
 #' @section Average treatment effect `ate(nuis)`:
@@ -89,13 +104,14 @@ riesz_curve_catalog$cfmean_a0 <- function(nuis) {
 #' single `alpha_star` and is not intended for use as a stage of a
 #' [ComposedRieszCurve]; compose the two `cfmean_a` curves instead and
 #' contrast with [riesz_delta_difference()].
-riesz_curve_catalog$ate <- function(nuis) {
+riesz_curve_catalog$ate <- function(nuis, outcome = "Y", treatment = "A") {
+  A <- .bt(treatment)
   RieszCurve$new(
     nuis = nuis,
-    alpha = ~ A / g - (1 - A) / (1 - g),
+    alpha = .f("~ ", A, " / g - (1 - ", A, ") / (1 - g)"),
     f = ~ m,
     h = ~ m1 - m0,
-    ic_expr = ~ h + alpha * (Y - f),
+    ic_expr = .f("~ h + alpha * (", .bt(outcome), " - f)"),
     targeting_steps = list(
       m  = list(),
       m1 = list(alpha_star = ~ 1 / g),
@@ -115,23 +131,24 @@ riesz_curve_catalog$ate <- function(nuis) {
 #' The `nuis` function must return `m0` (\eqn{E[Y | A = 0, L]} predicted for
 #' all units) and `g` (\eqn{P(A = 1 | L)}). TMLE is not yet supported for
 #' the ATT; use the one-step estimator via [riesz_att()].
-riesz_curve_catalog$att_theta <- function(nuis) {
+riesz_curve_catalog$att_theta <- function(nuis, outcome = "Y", treatment = "A") {
+  A <- .bt(treatment); Y <- .bt(outcome)
   RieszCurve$new(
     nuis = nuis,
-    alpha = ~ -(1 - A) * g / (1 - g),
+    alpha = .f("~ -(1 - ", A, ") * g / (1 - g)"),
     f = ~ m0,
-    h = ~ A * (Y - m0),
-    ic_expr = ~ h + alpha * (Y - f)
+    h = .f("~ ", A, " * (", Y, " - m0)"),
+    ic_expr = .f("~ h + alpha * (", Y, " - f)")
   )
 }
 
-riesz_curve_catalog$treated_proportion <- function() {
+riesz_curve_catalog$treated_proportion <- function(treatment = "A") {
   RieszCurve$new(
     nuis = list(),
     alpha = 0,
     f = 0,
-    h = ~ A,
-    ic_expr = ~ A
+    h = .f("~ ", .bt(treatment)),
+    ic_expr = .f("~ ", .bt(treatment))
   )
 }
 
@@ -156,11 +173,14 @@ riesz_curve_catalog$att <- function(...) {
 #' [riesz_delta_ratio()], which accounts for the estimation of the
 #' denominator in the variance.
 #'
-#' @param data A `data.frame`-like object with columns `A` and `Y`.
+#' @param data A `data.frame`-like object with a 0/1 treatment column and
+#'   an outcome column (named `A` and `Y` unless `treatment` / `outcome`
+#'   say otherwise).
 #' @param nuis A function of `data` returning a named list with elements
 #'   `m0` (predictions of \eqn{E[Y | A = 0, L]} for all units) and `g`
 #'   (predictions of \eqn{P(A = 1 | L)}).
 #' @param significance_alpha Significance level for Wald intervals.
+#' @param outcome,treatment Names of the outcome and treatment columns.
 #'
 #' @export
 #' @examples
@@ -179,13 +199,15 @@ riesz_curve_catalog$att <- function(...) {
 #'     g  = predict(g_fit, newdata = data, type = "response")
 #'   )
 #' })
-riesz_att <- function(data, nuis, significance_alpha = 0.05) {
+riesz_att <- function(data, nuis, significance_alpha = 0.05,
+                      outcome = "Y", treatment = "A") {
   fit_theta <- riesz_estimate(
-    data, riesz_curve_catalog$att_theta(nuis),
+    data, riesz_curve_catalog$att_theta(nuis, outcome = outcome,
+                                        treatment = treatment),
     significance_alpha = significance_alpha
   )
   fit_p <- riesz_estimate(
-    data, riesz_curve_catalog$treated_proportion(),
+    data, riesz_curve_catalog$treated_proportion(treatment = treatment),
     significance_alpha = significance_alpha
   )
   riesz_delta_ratio(
@@ -199,19 +221,15 @@ riesz_att <- function(data, nuis, significance_alpha = 0.05) {
 #' Target: \eqn{E[Y | V = v]}. The `nuis` function must return `m`
 #' (\eqn{E[Y | V]} at observed data), `mv` (\eqn{E[Y | V = v]}), and `pv`
 #' (a scalar, \eqn{P(V = v)}).
-riesz_curve_catalog$subgroup_mean <- function(v, nuis) {
-
-  alpha_formula <- as.formula(
-    paste0("~ I(V == ", v, ") / pv")
-  )
-
+riesz_curve_catalog$subgroup_mean <- function(v, nuis, outcome = "Y",
+                                              subgroup = "V") {
   RieszCurve$new(
     nuis = nuis,
-    alpha = alpha_formula,
+    alpha = .f("~ I(", .bt(subgroup), " == ", v, ") / pv"),
     alpha_star = ~ 1 / pv,
     f = ~ m,
     h = ~ mv,
-    ic_expr = ~ h + alpha * (Y - f),
+    ic_expr = .f("~ h + alpha * (", .bt(outcome), " - f)"),
     targeting_steps = list(
       m = list(),
       mv = list(alpha_star = ~ 1 / pv)
@@ -226,15 +244,15 @@ riesz_curve_catalog$subgroup_mean <- function(v, nuis) {
 #' Note the TMLE plug-in updates `m` with the clever covariate
 #' \eqn{1/\pi(V)} (all units), while the fluctuation score uses
 #' \eqn{R/\pi(V)}; unobserved units must receive the update too.
-riesz_curve_catalog$missing_mean <- function(nuis) {
-
+riesz_curve_catalog$missing_mean <- function(nuis, outcome = "Y",
+                                             observed = "R") {
   RieszCurve$new(
     nuis = nuis,
-    alpha = ~ R / pi,
+    alpha = .f("~ ", .bt(observed), " / pi"),
     alpha_star = ~ 1 / pi,
     f = ~ m,
     h = ~ m,
-    ic_expr = ~ h + alpha * (Y - f),
+    ic_expr = .f("~ h + alpha * (", .bt(outcome), " - f)"),
     targeting_steps = list(
       m = list(alpha_star = ~ 1 / pi)
     )
@@ -253,7 +271,7 @@ riesz_curve_catalog$missing_mean <- function(nuis) {
 #' the ratio evaluated at \eqn{A + \delta}); with `alpha_star = NULL`
 #' (default) only the one-step estimator [riesz_estimate()] is supported and
 #' [riesz_tmle()] will error.
-riesz_curve_catalog$mtp <- function(nuis, alpha_star = NULL) {
+riesz_curve_catalog$mtp <- function(nuis, alpha_star = NULL, outcome = "Y") {
 
   targeting <- NULL
   if (!is.null(alpha_star)) {
@@ -269,7 +287,7 @@ riesz_curve_catalog$mtp <- function(nuis, alpha_star = NULL) {
     alpha_star = alpha_star,
     f = ~ m,
     h = ~ m_shift,
-    ic_expr = ~ h + alpha * (Y - f),
+    ic_expr = .f("~ h + alpha * (", .bt(outcome), " - f)"),
     targeting_steps = targeting
   )
 }

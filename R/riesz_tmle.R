@@ -25,7 +25,9 @@
 #'   by the logistic fluctuation. In the composed case the same bounds are
 #'   applied to all intermediate targets, which are guaranteed to respect
 #'   them by construction of the logistic update.
-#' @param outcome_col Name of the outcome column in `data`.
+#' @param outcome_col Name of the outcome column in `data`. Required for a
+#'   single [RieszCurve]. For a [ComposedRieszCurve] it defaults to the
+#'   curve's own `outcome_col`, and supplying a different value is an error.
 #' @param fluctuation_weights Optional nonnegative observation weights for
 #'   the fluctuation regressions.
 #' @param clip Clipping constant for the logistic fluctuation, in (0, 0.5).
@@ -47,13 +49,28 @@ riesz_tmle <- function(data,
                        fluctuation_type = "logistic",
                        fluctuation_method = c("weighted", "covariate"),
                        bounds = NULL,
-                       outcome_col,
+                       outcome_col = NULL,
                        fluctuation_weights = NULL,
                        clip = 1e-6,
                        significance_alpha = 0.05,
                        score_tol = 0.05) {
 
   fluctuation_method <- match.arg(fluctuation_method)
+
+  # A ComposedRieszCurve carries its own outcome column (used by
+  # riesz_estimate() and rc$fit()); the TMLE must target the same column.
+  if (inherits(rc, "ComposedRieszCurve")) {
+    if (is.null(outcome_col)) {
+      outcome_col <- rc$outcome_col
+    } else if (!identical(outcome_col, rc$outcome_col)) {
+      stop("`outcome_col = \"", outcome_col, "\"` does not match the ",
+           "ComposedRieszCurve's `outcome_col = \"", rc$outcome_col,
+           "\"`. Set it once, via `ComposedRieszCurve$new(..., ",
+           "outcome_col = \"", outcome_col, "\")`.")
+    }
+  } else if (is.null(outcome_col)) {
+    stop("`outcome_col` must be supplied for a single RieszCurve.")
+  }
 
   .validate_riesz_tmle_inputs(
     data = data,

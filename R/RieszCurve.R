@@ -232,6 +232,20 @@ RieszCurve <- R6::R6Class(
         }
       }
 
+      # Formulas are evaluated in an environment built from the data
+      # columns, then the nuisances, then (for h / ic_expr) the evaluated
+      # components `alpha`, `f`, `h`. A data column sharing one of those
+      # names creates a conflict, so we throw an error
+      reserved <- c("alpha", "f", "h")
+      clash <- intersect(names(data), c(names(self$fit_nuis), reserved))
+      if (length(clash) > 0L) {
+        stop("Column(s) ", paste0("`", clash, "`", collapse = ", "),
+             " in `data` share a name with a nuisance returned by `nuis` ",
+             "or with a reserved symbol (`alpha`, `f`, `h`), so formulas ",
+             "would silently use the wrong object. Rename the column(s) ",
+             "or the nuisance(s).")
+      }
+
       recycle_n <- function(x, what) {
         if (is.null(x)) return(NULL)
         if (length(x) == 1L) x <- rep(x, n)

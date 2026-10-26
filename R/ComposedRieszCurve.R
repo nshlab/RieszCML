@@ -9,6 +9,13 @@
 #' previous stage's `h`, which is made available to it as a data column named
 #' `h[j=<stage>]`.
 #'
+#' @section Outcome column:
+#' The outcome column is declared once, via `outcome_col` (default `"Y"`),
+#' and must be the column that `rc_list[[1]]$ic_expr` refers to; the
+#' constructor checks this and errors otherwise. [riesz_estimate()] and
+#' [riesz_tmle()] both read the column name from the composed curve, so
+#' `riesz_tmle()` needs no `outcome_col` argument for a composed curve.
+#'
 #' @section Influence curve:
 #' With stages indexed innermost-first, the (uncentered) efficient influence
 #' curve is
@@ -114,6 +121,17 @@ ComposedRieszCurve <- R6::R6Class(
       }
       if (!is.character(outcome_col) || length(outcome_col) != 1L) {
         stop("`outcome_col` must be a character scalar.")
+      }
+      # Stage 1 regresses the outcome; its ic_expr names the outcome
+      # column. If that name isn't `outcome_col` (typically: user's outcome
+      # isn't `Y` but they left the default), the composed IC would be
+      # built against the wrong column -- silently, if a stray `Y` exists.
+      ic1 <- rc_list[[1]]$ic_expr
+      if (inherits(ic1, "formula") && !outcome_col %in% all.vars(ic1)) {
+        stop("Stage 1's `ic_expr` (", paste(deparse(ic1), collapse = ""),
+             ") does not reference `outcome_col = \"", outcome_col,
+             "\"`. Pass the outcome name explicitly, e.g. ",
+             "`ComposedRieszCurve$new(rc_list, outcome_col = \"<outcome>\")`.")
       }
       self$rc_list <- rc_list
       self$outcome_col <- outcome_col
