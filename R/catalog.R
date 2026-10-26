@@ -273,3 +273,91 @@ riesz_curve_catalog$mtp <- function(nuis, alpha_star = NULL) {
     targeting_steps = targeting
   )
 }
+
+
+#' @section Stochastic-interventional vaccine efficacy (SVE):
+#' SVE(delta) = 1 - psi_1(delta) / psi_0 is estimated with [riesz_sve()],
+#' which combines four linear functionals via the delta method:
+#' theta_1 = E[A * E(E(Y | S + delta, L, C = 1, A = 1) | V, R = 1, A = 1)]
+#' (a three-stage `ComposedRieszCurve` built by `sve_vaccine_numerator()`),
+#' theta_0 = E[(1 - A) E(Y | L, C = 1, A = 0)] (`sve_placebo_numerator()`),
+#' and P(A = 1), P(A = 0) (`arm_proportion()`).
+#'
+#' Required columns: `A` (1 = vaccine), `S` (marker; any finite value where
+#' unmeasured), `R` (phase-two indicator), `C` (1 = uncensored), `Y`
+#' (outcome; any finite value where censored).
+#'
+#' Stage nuisance contracts (all vectors of length nrow(data), finite):
+#' \describe{
+#'   \item{censoring stage}{`mC` = E[Y | S, L, C = 1, A = 1],
+#'     `pC` = P(C = 1 | S, L, A = 1). Fit among A = 1, R = 1 with weights 1/pi.}
+#'   \item{shift stage}{`m` = E[h[j=1] | S, L, A = 1] at observed S,
+#'     `m_shift` = the same at S + delta, and densities `g` = g(S | L),
+#'     `g_shift` = g(S - delta | L), `g_up` = g(S + delta | L). Fit among
+#'     A = 1, R = 1 with weights 1/pi.}
+#'   \item{phase-two stage}{`m` = E[h[j=2] | V, R = 1, A = 1] (any finite
+#'     value where A = 0), `pi` = P(R = 1 | V, A = 1) (any positive value
+#'     where A = 0).}
+#'   \item{placebo}{`m0` = E[Y | L, C = 1, A = 0], `pC0` = P(C = 1 | L, A = 0),
+#'     predicted for every row.}
+#' }
+riesz_curve_catalog$sve_censoring_stage <- function(nuis) {
+  RieszCurve$new(
+    nuis = nuis,
+    alpha = ~ C / pC,
+    alpha_star = ~ 1 / pC,
+    f = ~ mC,
+    h = ~ mC,
+    ic_expr = ~ h + alpha * (Y - f),
+    targeting_steps = list(mC = list(alpha_star = ~ 1 / pC))
+  )
+}
+
+riesz_curve_catalog$sve_shift_stage <- function(nuis) {
+  RieszCurve$new(
+    nuis = nuis,
+    alpha = ~ g_shift / g,
+    alpha_star = ~ g / g_up,      # representer at the shifted marker
+    f = ~ m,
+    h = ~ m_shift,
+    ic_expr = ~ h + alpha * (`h[j=1]` - f)
+  )
+}
+
+riesz_curve_catalog$sve_phase2_stage <- function(nuis) {
+  RieszCurve$new(
+    nuis = nuis,
+    alpha = ~ A * R / pi,
+    alpha_star = ~ A / pi,
+    f = ~ m,
+    h = ~ A * m,
+    ic_expr = ~ h + alpha * (`h[j=2]` - f)
+  )
+}
+
+riesz_curve_catalog$sve_vaccine_numerator <- function(nuis_censoring,
+                                                      nuis_shift,
+                                                      nuis_phase2) {
+  ComposedRieszCurve$new(rc_list = list(
+    riesz_curve_catalog$sve_censoring_stage(nuis_censoring),
+    riesz_curve_catalog$sve_shift_stage(nuis_shift),
+    riesz_curve_catalog$sve_phase2_stage(nuis_phase2)
+  ))
+}
+
+riesz_curve_catalog$sve_placebo_numerator <- function(nuis) {
+  RieszCurve$new(
+    nuis = nuis,
+    alpha = ~ (1 - A) * C / pC0,
+    alpha_star = ~ (1 - A) / pC0,
+    f = ~ m0,
+    h = ~ (1 - A) * m0,
+    ic_expr = ~ h + alpha * (Y - f),
+    targeting_steps = list(m0 = list(alpha_star = ~ (1 - A) / pC0))
+  )
+}
+
+riesz_curve_catalog$arm_proportion <- function(a) {
+  ind <- as.formula(paste0("~ as.numeric(A == ", a, ")"))
+  RieszCurve$new(nuis = list(), alpha = 0, f = 0, h = ind, ic_expr = ind)
+}
